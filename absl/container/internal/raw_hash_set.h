@@ -2331,7 +2331,7 @@ class raw_hash_set {
   void reserve(size_t n) {
     if (n > size() + growth_left()) {
       size_t m = GrowthToLowerboundCapacity(n);
-      resize(NormalizeCapacity(m));
+      resize(NormalizeCapacity(n));
 
       // This is after resize, to ensure that we have completed the allocation
       // and have potentially sampled the hashtable.
@@ -2358,7 +2358,7 @@ class raw_hash_set {
   // Issues CPU prefetch instructions for the memory needed to find or insert
   // a key.  Like all lookup functions, this support heterogeneous keys.
   //
-  // NOTE: This is a very low level operation and should not be used without
+  // NOTE: This is a very low level operation and should not #be used without
   // specific benchmarks indicating its importance.
   template <class K = key_type>
   void prefetch(const key_arg<K>& key) const {
@@ -2666,10 +2666,13 @@ class raw_hash_set {
       //  762 | 149836       0.37        13 | 148559       0.74       190
       //  807 | 149736       0.39        14 | 151107       0.39        14
       //  852 | 150204       0.42        15 | 151019       0.42        15
+      printf("CLearing tombstones\n");
       drop_deletes_without_resize();
     } else {
       // Otherwise grow the container.
-      resize(NextCapacity(cap));
+      // resize(NextCapacity(cap));
+      printf("CLearing tombstones\n");
+      drop_deletes_without_resize();
     }
   }
 
@@ -2726,6 +2729,11 @@ class raw_hash_set {
     if (!rehash_for_bug_detection &&
         ABSL_PREDICT_FALSE(growth_left() == 0 &&
                            !IsDeleted(control()[target.offset]))) {
+      /* What is the !IsDeleted condition? When does that happen? 
+      My guess is that you can resize now because growth_left is 0
+      But if it's deleted, you're consuming a tombstone, so just take it?
+      So Resize only when taking up a empty slot?
+      */
       rehash_and_grow_if_necessary();
       target = find_first_non_full(common(), hash);
     }
@@ -2775,7 +2783,10 @@ class raw_hash_set {
   // side-effect.
   //
   // See `CapacityToGrowth()`.
-  size_t growth_left() const { return common().growth_left(); }
+  size_t growth_left() const { 
+    printf("%lu\n", growth_left);
+    return common().growth_left(); 
+  }
   void set_growth_left(size_t gl) { return common().set_growth_left(gl); }
 
   // Prefetch the heap-allocated memory region to resolve potential TLB and
