@@ -2784,7 +2784,6 @@ class raw_hash_set {
   //
   // See `CapacityToGrowth()`.
   size_t growth_left() const { 
-    printf("%lu\n", growth_left);
     return common().growth_left(); 
   }
   void set_growth_left(size_t gl) { return common().set_growth_left(gl); }
