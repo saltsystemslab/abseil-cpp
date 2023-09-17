@@ -2666,12 +2666,10 @@ class raw_hash_set {
       //  762 | 149836       0.37        13 | 148559       0.74       190
       //  807 | 149736       0.39        14 | 151107       0.39        14
       //  852 | 150204       0.42        15 | 151019       0.42        15
-      printf("CLearing tombstones\n");
       drop_deletes_without_resize();
     } else {
       // Otherwise grow the container.
       // resize(NextCapacity(cap));
-      printf("CLearing tombstones\n");
       drop_deletes_without_resize();
     }
   }
