@@ -2337,6 +2337,13 @@ class raw_hash_set {
     common().set_reservation_size(n);
   }
 
+  size_t get_size() {
+    printf("%lu %lu\n", common().capacity(), sizeof(slot_type));
+    return AllocSize(common().capacity(), sizeof(slot_type), alignof(slot_type),
+                    true);
+  }
+  
+
   // Extension API: support for heterogeneous keys.
   //
   //   std::unordered_set<std::string> s;
