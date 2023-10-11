@@ -1150,7 +1150,9 @@ inline size_t NormalizeCapacity(size_t n) {
 inline size_t CapacityToGrowth(size_t capacity) {
   assert(IsValidCapacity(capacity));
   // This determines rebuild window.
-  return capacity * 0.97;
+  // Why 0.975? This is for max load factor 0.95, when X=20
+  // C(1-1/X) + C/2X = Capacity growth.
+  return capacity * 0.975;
 }
 
 // Given `growth`, "unapplies" the load factor to find how large the capacity
