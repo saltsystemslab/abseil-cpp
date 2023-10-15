@@ -1145,6 +1145,9 @@ inline size_t NormalizeCapacity(size_t n) {
 //   never need to probe (the whole table fits in one group) so we don't need a
 //   load factor less than 1.
 
+#ifndef CX
+#define CX 0.975
+#endif
 // Given `capacity`, applies the load factor; i.e., it returns the maximum
 // number of values we should put into the table before a resizing rehash.
 inline size_t CapacityToGrowth(size_t capacity) {
@@ -1152,7 +1155,7 @@ inline size_t CapacityToGrowth(size_t capacity) {
   // This determines rebuild window.
   // Why 0.975? This is for max load factor 0.95, when X=20
   // C(1-1/X) + C/2X = Capacity growth.
-  return capacity * 0.975;
+  return capacity * CX;
 }
 
 // Given `growth`, "unapplies" the load factor to find how large the capacity
