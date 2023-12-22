@@ -666,6 +666,34 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "raw_hash_set_zombie",
+    srcs = ["internal/raw_hash_set.cc"],
+    hdrs = ["internal/raw_hash_set.h"],
+    copts = ABSL_DEFAULT_COPTS + ["-DZOMBIE_LINEAR_PROBING"],
+    linkopts = ABSL_DEFAULT_LINKOPTS,
+    deps = [
+        ":common",
+        ":compressed_tuple",
+        ":container_memory",
+        ":hash_policy_traits",
+        ":hashtable_debug_hooks",
+        ":hashtablez_sampler",
+        "//absl/base:config",
+        "//absl/base:core_headers",
+        "//absl/base:dynamic_annotations",
+        "//absl/base:endian",
+        "//absl/base:prefetch",
+        "//absl/base:raw_logging_internal",
+        "//absl/hash",
+        "//absl/memory",
+        "//absl/meta:type_traits",
+        "//absl/numeric:bits",
+        "//absl/utility",
+    ],
+)
+
+
 cc_test(
     name = "raw_hash_set_test",
     srcs = ["internal/raw_hash_set_test.cc"],
@@ -738,6 +766,29 @@ cc_binary(
         "//absl/strings:str_format",
     ],
 )
+
+cc_binary(
+    name = "raw_hash_set_probe_benchmark_zlp",
+    testonly = 1,
+    srcs = ["internal/raw_hash_set_probe_benchmark.cc"],
+    copts = ABSL_TEST_COPTS,
+    linkopts = select({
+        "//conditions:default": [],
+    }) + ABSL_DEFAULT_LINKOPTS,
+    tags = ["benchmark"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":flat_hash_map",
+        ":hash_function_defaults",
+        ":hashtable_debug",
+        ":raw_hash_set_zombie",
+        "//absl/random",
+        "//absl/random:distributions",
+        "//absl/strings",
+        "//absl/strings:str_format",
+    ],
+)
+
 
 cc_test(
     name = "raw_hash_set_allocator_test",
