@@ -127,6 +127,22 @@ TEST(Util, GrowthAndCapacity) {
   }
 }
 
+#ifdef ZOMBIE_LINEAR_PROBING
+TEST(Util, probe_seq) {
+  probe_seq<16> seq(0, 127);
+  auto gen = [&]() {
+    size_t res = seq.offset();
+    seq.next();
+    return res;
+  };
+  std::vector<size_t> offsets(8);
+  std::generate_n(offsets.begin(), 8, gen);
+  EXPECT_THAT(offsets, ElementsAre(0, 16, 32, 48, 64, 80, 96, 112));
+  seq = probe_seq<16>(128, 127);
+  std::generate_n(offsets.begin(), 8, gen);
+  EXPECT_THAT(offsets, ElementsAre(0, 16, 32, 48, 64, 80, 96, 112));
+}
+#else
 TEST(Util, probe_seq) {
   probe_seq<16> seq(0, 127);
   auto gen = [&]() {
@@ -141,6 +157,7 @@ TEST(Util, probe_seq) {
   std::generate_n(offsets.begin(), 8, gen);
   EXPECT_THAT(offsets, ElementsAre(0, 16, 48, 96, 32, 112, 80, 64));
 }
+#endif
 
 TEST(BitMask, Smoke) {
   EXPECT_FALSE((BitMask<uint8_t, 8>(0)));

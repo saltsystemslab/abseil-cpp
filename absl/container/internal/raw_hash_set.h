@@ -323,9 +323,15 @@ class probe_seq {
   size_t offset(size_t i) const { return (offset_ + i) & mask_; }
 
   void next() {
+  #ifdef ZOMBIE_LINEAR_PROBING
+    index_ += Width;
+    offset_ += Width;
+    offset_ &= mask_;
+  #else
     index_ += Width;
     offset_ += index_;
     offset_ &= mask_;
+  #endif
   }
   // 0-based probe index, a multiple of `Width`.
   size_t index() const { return index_; }

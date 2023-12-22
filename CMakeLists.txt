@@ -86,6 +86,13 @@ option(ABSL_USE_SYSTEM_INCLUDES
   "Silence warnings in Abseil headers by marking them as SYSTEM includes"
   OFF)
 
+option(ZOMBIE_LINEAR_PROBING
+  "Use linear probing in raw_hash_set"
+ON)
+if (ZOMBIE_LINEAR_PROBING)
+  add_compile_definitions(-DZOMBIE_LINEAR_PROBING)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_LIST_DIR}/CMake
   ${CMAKE_CURRENT_LIST_DIR}/absl/copts

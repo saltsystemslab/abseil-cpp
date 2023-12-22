@@ -1,3 +1,86 @@
+# Abseil with Zombie Linear Probing
+
+## Quickstart
+```bash
+mkdir build
+cd build
+cmake ../ -DCMAKE_BUILD_TYPE=Debug  -DZOMBIE_LINEAR_PROBING=ON -DABSL_GOOGLETEST_DOWNLOAD_URL=https://github.com/google/googletest/archive/2dd1c131950043a8ad5ab0d2dda0e0970596586a.zip -DABSL_BUILD_TESTING=ON
+make -j
+./bin/absl_raw_hash_set_test
+```
+
+## Notes
+
+```c++
+// absl/container/flat_hash_map.h
+flat_hash_map<K, V, Hash, Eq, Allocator>: 
+	raw_hash_map<FlatHashMapPolicy<K,V,Hash,Eq,Allocator>
+
+
+// absl/container/internal/raw_hash_map.h
+class raw_hash_map : public raw_hash_set<Policy, Hash, Eq, Alloc> 
+
+// absl/container/internal/raw_hash_set.h
+// An open-addressing
+// hashtable with quadratic probing.
+// IMPLEMENTATION DETAILS
+//
+// # Table Layout
+//
+// A raw_hash_set's backing array consists of control bytes followed by slots
+// that may or may not contain objects.
+//
+// The layout of the backing array, for `capacity` slots, is thus, as a
+// pseudo-struct:
+//
+//   struct BackingArray {
+//     // Sampling handler. This field isn't present when the sampling is
+//     // disabled or this allocation hasn't been selected for sampling.
+//     HashtablezInfoHandle infoz_;
+//     // The number of elements we can insert before growing the capacity.
+//     size_t growth_left;
+//     // Control bytes for the "real" slots.
+//     ctrl_t ctrl[capacity];
+//     // Always `ctrl_t::kSentinel`. This is used by iterators to find when to
+//     // stop and serves no other purpose.
+//     ctrl_t sentinel;
+//     // A copy of the first `kWidth - 1` elements of `ctrl`. This is used so
+//     // that if a probe sequence picks a value near the end of `ctrl`,
+//     // `Group` will have valid control bytes to look at.
+//     ctrl_t clones[kWidth - 1];
+//     // The actual slot data.
+//     slot_type slots[capacity];
+//   };
+//
+
+//raw_hash_set:467
+// The values here are selected for maximum performance. See the static asserts
+// below for details.
+
+// A `ctrl_t` is a single control byte, which can have one of four
+// states: empty, deleted, full (which has an associated seven-bit h2_t value)
+// and the sentinel. They have the following bit patterns:
+//
+//      empty: 1 0 0 0 0 0 0 0
+//    deleted: 1 1 1 1 1 1 1 0
+//       full: 0 h h h h h h h  // h represents the hash bits.
+//   sentinel: 1 1 1 1 1 1 1 1
+//
+// These values are specifically tuned for SSE-flavored SIMD.
+// The static_asserts below detail the source of these choices.
+//
+// We use an enum class so that when strict aliasing is enabled, the compiler
+// knows ctrl_t doesn't alias other types.
+
+
+// Vectorized Instruction implementation
+// raw_hash_set:617
+struct GroupSse2Impl {
+}
+```
+
+
+
 # Abseil - C++ Common Libraries
 
 The repository contains the Abseil C++ library code. Abseil is an open-source
