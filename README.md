@@ -1,12 +1,25 @@
 # Abseil with Zombie Linear Probing
 
 ## Quickstart
+
 ```bash
 mkdir build
 cd build
 cmake ../ -DCMAKE_BUILD_TYPE=Debug  -DZOMBIE_LINEAR_PROBING=ON -DABSL_GOOGLETEST_DOWNLOAD_URL=https://github.com/google/googletest/archive/2dd1c131950043a8ad5ab0d2dda0e0970596586a.zip -DABSL_BUILD_TESTING=ON
 make -j
 ./bin/absl_raw_hash_set_test
+```
+
+### To run probe benchmark
+
+(Not sure what the probe benchmark does yet.)
+
+```bash
+# Get Bazel, add below binary to $PATH as bazel
+wget https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
+
+bazel run raw_hash_set_probe_benchmark
+bazel run raw_hash_set_probe_benchmark_zlp
 ```
 
 ## Notes
