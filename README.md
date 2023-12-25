@@ -1,5 +1,11 @@
 # Abseil with Zombie Linear Probing
 
+WARNING: In the current state, the hashmap is broken if you don't reserve some space. 
+```
+h.reserve(1196)
+```
+
+
 ## Quickstart
 
 ```bash

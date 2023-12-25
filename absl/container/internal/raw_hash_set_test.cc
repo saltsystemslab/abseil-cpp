@@ -1071,14 +1071,15 @@ struct Modulo1000HashTable
 
 TEST(Table, RedistributeTombstones) {
   Modulo1000HashTable t;
+  t.reserve(2047);
   for(size_t i = 0; i < 1000; i++) {
-    t.insert(i * 1000);
+    t.insert(i*1000);
   }
   RawHashSetTestOnlyAccess::DropDeletesWithoutResize(t);
   EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 0);
 
-  RawHashSetTestOnlyAccess::DropDeletesWithoutResizeAndRedistributeTombstones(t, 300);
-  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 3);
+  RawHashSetTestOnlyAccess::DropDeletesWithoutResizeAndRedistributeTombstones(t, 100);
+  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 10);
 
 };
 

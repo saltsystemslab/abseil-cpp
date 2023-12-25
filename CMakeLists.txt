@@ -93,6 +93,13 @@ if (ZOMBIE_LINEAR_PROBING)
   add_compile_definitions(-DZOMBIE_LINEAR_PROBING)
 endif()
 
+option(ZOMBIE_GRAVEYARD
+  "Use linear probing in raw_hash_set"
+ON)
+if (ZOMBIE_GRAVEYARD)
+  add_compile_definitions(-DZOMBIE_GRAVEYARD)
+endif()
+
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_LIST_DIR}/CMake
   ${CMAKE_CURRENT_LIST_DIR}/absl/copts

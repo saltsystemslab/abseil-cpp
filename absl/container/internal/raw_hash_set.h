@@ -1196,7 +1196,7 @@ inline size_t NormalizeCapacity(size_t n) {
 // - For (capacity+1) < Group::kWidth, growth == capacity. In this case, we
 //   never need to probe (the whole table fits in one group) so we don't need a
 //   load factor less than 1.
-
+// Zombie: Fixed at 0.975.
 #ifndef CX
 #define CX 0.975
 #endif
@@ -2626,10 +2626,17 @@ class raw_hash_set {
     }
   }
 
+  void reserveFixed(size_t n) {
+      resize(NormalizeCapacity(n));
+      infoz().RecordReservation(n);
+      common().reset_reserved_growth(n);
+      common().set_reservation_size(n);
+  }
+
   void reserve(size_t n) {
     if (n > size() + growth_left()) {
       size_t m = GrowthToLowerboundCapacity(n);
-      resize(NormalizeCapacity(n));
+      resize(NormalizeCapacity(m));
 
       // This is after resize, to ensure that we have completed the allocation
       // and have potentially sampled the hashtable.
@@ -3022,7 +3029,13 @@ private:
     } else {
       // Otherwise grow the container.
       // resize(NextCapacity(cap));
+      #ifdef ZOMBIE_GRAVEYARD 
+      // x=1/(1-lf), lf = 0.95, x = 20.
+      // place a tombstone every n/4x position
+      drop_deletes_without_resize_and_redistribute(cap/80);
+      #else
       drop_deletes_without_resize();
+      #endif
     }
   }
 
