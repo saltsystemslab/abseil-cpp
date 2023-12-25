@@ -2647,7 +2647,6 @@ class raw_hash_set {
   }
 
   size_t get_size() {
-    printf("%lu %lu\n", common().capacity(), sizeof(slot_type));
     return AllocSize(common().capacity(), sizeof(slot_type), alignof(slot_type),
                     true);
   }
@@ -2964,6 +2963,7 @@ class raw_hash_set {
     // Stack-allocate space for swapping elements.
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
+    get_size();
   }
 
   inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
@@ -2971,6 +2971,7 @@ class raw_hash_set {
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
     RedistributeTombstones(common(), GetPolicyFunctions(), tombstone_distance, tmp);
+    get_size();
   }
 
 private:
@@ -3032,9 +3033,11 @@ private:
       #ifdef ZOMBIE_GRAVEYARD 
       // x=1/(1-lf), lf = 0.95, x = 20.
       // place a tombstone every n/4x position
-      drop_deletes_without_resize_and_redistribute(cap/80);
+      drop_deletes_without_resize_and_redistribute(80);
+      printf("Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #else
       drop_deletes_without_resize();
+      printf("No Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #endif
     }
   }

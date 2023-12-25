@@ -88,14 +88,14 @@ option(ABSL_USE_SYSTEM_INCLUDES
 
 option(ZOMBIE_LINEAR_PROBING
   "Use linear probing in raw_hash_set"
-ON)
+OFF)
 if (ZOMBIE_LINEAR_PROBING)
   add_compile_definitions(-DZOMBIE_LINEAR_PROBING)
 endif()
 
 option(ZOMBIE_GRAVEYARD
   "Use linear probing in raw_hash_set"
-ON)
+OFF)
 if (ZOMBIE_GRAVEYARD)
   add_compile_definitions(-DZOMBIE_GRAVEYARD)
 endif()
