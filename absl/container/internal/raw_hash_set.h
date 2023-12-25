@@ -1197,16 +1197,17 @@ inline size_t NormalizeCapacity(size_t n) {
 //   never need to probe (the whole table fits in one group) so we don't need a
 //   load factor less than 1.
 
+#ifndef CX
+#define CX 0.975
+#endif
 // Given `capacity`, applies the load factor; i.e., it returns the maximum
 // number of values we should put into the table before a resizing rehash.
 inline size_t CapacityToGrowth(size_t capacity) {
   assert(IsValidCapacity(capacity));
-  // `capacity*7/8`
-  if (Group::kWidth == 8 && capacity == 7) {
-    // x-x/8 does not work when x==7.
-    return 6;
-  }
-  return capacity - capacity / 8;
+  // This determines rebuild window.
+  // Why 0.975? This is for max load factor 0.95, when X=20
+  // C(1-1/X) + C/2X = Capacity growth.
+  return capacity * CX;
 }
 
 // Given `growth`, "unapplies" the load factor to find how large the capacity
@@ -2628,7 +2629,7 @@ class raw_hash_set {
   void reserve(size_t n) {
     if (n > size() + growth_left()) {
       size_t m = GrowthToLowerboundCapacity(n);
-      resize(NormalizeCapacity(m));
+      resize(NormalizeCapacity(n));
 
       // This is after resize, to ensure that we have completed the allocation
       // and have potentially sampled the hashtable.
@@ -2637,6 +2638,13 @@ class raw_hash_set {
     common().reset_reserved_growth(n);
     common().set_reservation_size(n);
   }
+
+  size_t get_size() {
+    printf("%lu %lu\n", common().capacity(), sizeof(slot_type));
+    return AllocSize(common().capacity(), sizeof(slot_type), alignof(slot_type),
+                    true);
+  }
+  
 
   // Extension API: support for heterogeneous keys.
   //
@@ -2655,7 +2663,7 @@ class raw_hash_set {
   // Issues CPU prefetch instructions for the memory needed to find or insert
   // a key.  Like all lookup functions, this support heterogeneous keys.
   //
-  // NOTE: This is a very low level operation and should not be used without
+  // NOTE: This is a very low level operation and should not #be used without
   // specific benchmarks indicating its importance.
   template <class K = key_type>
   void prefetch(const key_arg<K>& key) const {
@@ -3013,7 +3021,8 @@ private:
       drop_deletes_without_resize();
     } else {
       // Otherwise grow the container.
-      resize(NextCapacity(cap));
+      // resize(NextCapacity(cap));
+      drop_deletes_without_resize();
     }
   }
 
@@ -3117,6 +3126,11 @@ private:
         ABSL_PREDICT_FALSE(growth_left() == 0 &&
                            !IsDeleted(control()[target.offset]))) {
       size_t old_capacity = capacity();
+      /* What is the !IsDeleted condition? When does that happen? 
+      My guess is that you can resize now because growth_left is 0
+      But if it's deleted, you're consuming a tombstone, so just take it?
+      So Resize only when taking up a empty slot?
+      */
       rehash_and_grow_if_necessary();
       // NOTE: It is safe to use `FindFirstNonFullAfterResize`.
       // `FindFirstNonFullAfterResize` must be called right after resize.
@@ -3173,7 +3187,9 @@ private:
   // side-effect.
   //
   // See `CapacityToGrowth()`.
-  size_t growth_left() const { return common().growth_left(); }
+  size_t growth_left() const { 
+    return common().growth_left(); 
+  }
   void set_growth_left(size_t gl) { return common().set_growth_left(gl); }
 
   // Prefetch the heap-allocated memory region to resolve potential TLB and

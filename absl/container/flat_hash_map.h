@@ -545,6 +545,8 @@ class flat_hash_map : public absl::container_internal::raw_hash_map<
   //
   // Returns the function used for comparing keys equality.
   using Base::key_eq;
+
+  using Base::get_size;
 };
 
 // erase_if(flat_hash_map<>, Pred)
