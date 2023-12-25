@@ -16,3 +16,6 @@ copts/__pycache__/
 debug/*
 build/*
 debug_*/*
+MODULE.bazel
+MODULE.bazel.lock
+out.txt

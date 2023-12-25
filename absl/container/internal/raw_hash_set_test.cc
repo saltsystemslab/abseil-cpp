@@ -70,6 +70,14 @@ struct RawHashSetTestOnlyAccess {
   static size_t CountTombstones(const C& c) {
     return c.common().TombstonesCount();
   }
+  template <typename C>
+  static void DropDeletesWithoutResizeAndRedistributeTombstones(C& c, size_t tombstone_dist) {
+    c.drop_deletes_without_resize_and_redistribute(tombstone_dist);
+  }
+  template <typename C>
+  static void DropDeletesWithoutResize(C& c) {
+    c.drop_deletes_without_resize();
+  }
 };
 
 namespace {
@@ -315,6 +323,7 @@ TEST(Batch, DropDeletes) {
         << i << " " << static_cast<int>(pattern[i % pattern.size()]);
   }
 }
+
 
 TEST(Group, CountLeadingEmptyOrDeleted) {
   const std::vector<ctrl_t> empty_examples = {ctrl_t::kEmpty, ctrl_t::kDeleted};
@@ -1057,7 +1066,21 @@ struct Modulo1000Hash {
 
 struct Modulo1000HashTable
     : public raw_hash_set<IntPolicy, Modulo1000Hash, std::equal_to<int>,
-                          std::allocator<int>> {};
+                          std::allocator<int>> {
+};
+
+TEST(Table, RedistributeTombstones) {
+  Modulo1000HashTable t;
+  for(size_t i = 0; i < 1000; i++) {
+    t.insert(i * 1000);
+  }
+  RawHashSetTestOnlyAccess::DropDeletesWithoutResize(t);
+  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 0);
+
+  RawHashSetTestOnlyAccess::DropDeletesWithoutResizeAndRedistributeTombstones(t, 300);
+  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 3);
+
+};
 
 // Test that rehash with no resize happen in case of many deleted slots.
 TEST(Table, RehashWithNoResize) {

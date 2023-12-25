@@ -140,6 +140,61 @@ static inline void* PrevSlot(void* slot, size_t slot_size) {
   return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(slot) - slot_size);
 }
 
+// Should be called right after DropDeletesWithoutResize.
+// Scans the entire hash table and places a tombstone (deleted marker) every tombstone_distance spot.
+void RedistributeTombstones(CommonFields& common,
+                              const PolicyFunctions& policy, int tombstone_distance, void* tmp_space) {
+  void* set = &common;
+  void* slot_array = common.slot_array();
+  const size_t capacity = common.capacity();
+  assert(IsValidCapacity(capacity));
+  assert(!is_small(capacity));
+
+  ctrl_t* ctrl = common.control();
+  auto transfer = policy.transfer;
+  auto hasher = policy.hash_slot;
+  const size_t slot_size = policy.slot_size;
+  void* slot_ptr = SlotAddress(slot_array, 0, slot_size);
+
+  size_t next_primitive_tombstone = tombstone_distance;
+  void* primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+
+  for (size_t i = 0; i != capacity;
+       ++i, slot_ptr = NextSlot(slot_ptr, slot_size)) {
+        // There should only be empty slots after a resize.
+        assert(!IsDeleted(ctrl[i])); 
+        if (IsFull(ctrl[i])) continue;
+        // We do not swap for an item ahead of current as that would mess up home slots.
+        if (i < next_primitive_tombstone) continue;
+
+        assert(!IsDeleted(ctrl[next_primitive_tombstone])); 
+        
+        // Next Primitive Tombstone was already an empty space, so we can use this empty slot
+        // for later.
+        if (IsEmpty(ctrl[next_primitive_tombstone])) {
+          next_primitive_tombstone += tombstone_distance;
+          primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+          --i;
+          slot_ptr = PrevSlot(slot_ptr, slot_size);
+          continue;
+        }
+
+        // Swap item in next_pts here, mark next_pts as tombstone 
+        // the target as a tombstone.
+        const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
+        SetCtrl(common, i, H2(hash), slot_size);
+        // Swap i and new_i elements.
+        (*transfer)(set, tmp_space, primitive_tombstone_ptr);
+        (*transfer)(set, primitive_tombstone_ptr, slot_ptr);
+        (*transfer)(set, slot_ptr, tmp_space);
+        SetCtrl(common, next_primitive_tombstone, ctrl_t::kDeleted, slot_size);
+
+        next_primitive_tombstone += tombstone_distance;
+        primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+  }
+
+}
+
 void DropDeletesWithoutResize(CommonFields& common,
                               const PolicyFunctions& policy, void* tmp_space) {
   void* set = &common;

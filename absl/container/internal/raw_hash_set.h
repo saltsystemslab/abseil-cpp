@@ -1825,6 +1825,8 @@ ABSL_ATTRIBUTE_NOINLINE void TransferRelocatable(void*, void* dst, void* src) {
 // Type-erased version of raw_hash_set::drop_deletes_without_resize.
 void DropDeletesWithoutResize(CommonFields& common,
                               const PolicyFunctions& policy, void* tmp_space);
+void RedistributeTombstones(CommonFields& common,
+                              const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
 
 // A SwissTable.
 //
@@ -2949,6 +2951,14 @@ class raw_hash_set {
     DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
   }
 
+  inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
+    // Stack-allocate space for swapping elements.
+    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
+    DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
+    RedistributeTombstones(common(), GetPolicyFunctions(), tombstone_distance, tmp);
+  }
+
+private:
   // Called whenever the table *might* need to conditionally grow.
   //
   // This function is an optimization opportunity to perform a rehash even when
