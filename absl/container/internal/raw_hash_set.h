@@ -323,7 +323,7 @@ class probe_seq {
   size_t offset(size_t i) const { return (offset_ + i) & mask_; }
 
   void next() {
-  #ifdef ABSL_ZOMBIE
+  #ifdef ABSL_LINEAR_PROBING
     index_ += Width;
     offset_ += Width;
     offset_ &= mask_;
@@ -3043,12 +3043,14 @@ private:
       resize(NextCapacity(cap));
       #elif ABSL_ZOMBIE_GRAVEYARD
       // Graveyard - Clear and redistribute tombstones.
+      // Disable resizing.
       // x=1/(1-lf), lf = 0.95, x = 20.
       // place a tombstone every n/4x position
       drop_deletes_without_resize_and_redistribute(80);
       printf("Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #else
-      // Standard Linear Probing: Clear all tombstones out.
+      // Standard Tombstone clearing: Clear all tombstones out. Valid for both linear and quadratic probing.
+      // Disable resizing.
       drop_deletes_without_resize();
       printf("No Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #endif
