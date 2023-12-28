@@ -1205,13 +1205,14 @@ inline size_t NormalizeCapacity(size_t n) {
 inline size_t CapacityToGrowth(size_t capacity) {
   assert(IsValidCapacity(capacity));
   #ifndef ABSL_ZOMBIE
-    // `capacity*7/8`
+  // Old Code.
+  // `capacity*7/8`
   if (Group::kWidth == 8 && capacity == 7) {
     // x-x/8 does not work when x==7.
     return 6;
   }
   return capacity - capacity / 8;
-  #else // Old Code
+  #else
   // This determines rebuild window.
   // Why 0.975? This is for max load factor 0.95, when X=20
   // C(1-1/X) + C/2X = Capacity growth.
@@ -3051,8 +3052,9 @@ private:
       #else
       // Standard Tombstone clearing: Clear all tombstones out. Valid for both linear and quadratic probing.
       // Disable resizing.
+      printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       drop_deletes_without_resize();
-      printf("No Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
+      printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       #endif
     }
   }
@@ -3153,15 +3155,11 @@ private:
       resize(growth_left() > 0 ? cap : NextCapacity(cap));
     }
     auto target = find_first_non_full(common(), hash);
+    // Resize if growth left == 0 and we are consuming a new slot.
     if (!rehash_for_bug_detection &&
         ABSL_PREDICT_FALSE(growth_left() == 0 &&
                            !IsDeleted(control()[target.offset]))) {
       size_t old_capacity = capacity();
-      /* What is the !IsDeleted condition? When does that happen? 
-      My guess is that you can resize now because growth_left is 0
-      But if it's deleted, you're consuming a tombstone, so just take it?
-      So Resize only when taking up a empty slot?
-      */
       rehash_and_grow_if_necessary();
       // NOTE: It is safe to use `FindFirstNonFullAfterResize`.
       // `FindFirstNonFullAfterResize` must be called right after resize.
