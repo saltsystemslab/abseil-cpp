@@ -86,19 +86,22 @@ option(ABSL_USE_SYSTEM_INCLUDES
   "Silence warnings in Abseil headers by marking them as SYSTEM includes"
   OFF)
 
-option(ZOMBIE_LINEAR_PROBING
+#ABSL ZOMBIE OPTIONS begin.
+# Use bazel as much as possible. These might be out of sync.
+option(ABSL_LINEAR_PROBING
   "Use linear probing in raw_hash_set"
 OFF)
-if (ZOMBIE_LINEAR_PROBING)
-  add_compile_definitions(-DZOMBIE_LINEAR_PROBING)
+if (ABSL_LINEAR_PROBING)
+  add_compile_definitions(-DABSL_LINEAR_PROBING)
 endif()
 
-option(ZOMBIE_GRAVEYARD
+option(ABSL_ZOMBIE_GRAVEYARD
   "Use linear probing in raw_hash_set"
 OFF)
-if (ZOMBIE_GRAVEYARD)
-  add_compile_definitions(-DZOMBIE_GRAVEYARD)
+if (ABSL_ZOMBIE_GRAVEYARD)
+  add_compile_definitions(-DABSL_ZOMBIE_GRAVEYARD)
 endif()
+#ABSL ZOMBIE OPTIONS end.
 
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_LIST_DIR}/CMake

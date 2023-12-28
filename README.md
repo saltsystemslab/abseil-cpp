@@ -1,6 +1,6 @@
 # Abseil with Zombie Linear Probing
 
-WARNING: In the current state, the hashmap is broken if you don't reserve some space. 
+WARNING: If using ABSL_ZOMBIE option, you need to reserve space to use the hashmap.
 ```
 h.reserve(1196)
 ```
