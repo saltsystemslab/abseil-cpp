@@ -135,7 +135,7 @@ TEST(Util, GrowthAndCapacity) {
   }
 }
 
-#ifdef ZOMBIE_LINEAR_PROBING
+#ifdef ABSL_ZOMBIE
 TEST(Util, probe_seq) {
   probe_seq<16> seq(0, 127);
   auto gen = [&]() {
@@ -1069,6 +1069,7 @@ struct Modulo1000HashTable
                           std::allocator<int>> {
 };
 
+#ifdef ABSL_ZOMBIE_GRAVEYARD
 TEST(Table, RedistributeTombstones) {
   Modulo1000HashTable t;
   t.reserve(2047);
@@ -1082,6 +1083,7 @@ TEST(Table, RedistributeTombstones) {
   EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 10);
 
 };
+#endif
 
 // Test that rehash with no resize happen in case of many deleted slots.
 TEST(Table, RehashWithNoResize) {

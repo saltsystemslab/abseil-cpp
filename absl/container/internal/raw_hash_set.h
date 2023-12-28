@@ -323,7 +323,7 @@ class probe_seq {
   size_t offset(size_t i) const { return (offset_ + i) & mask_; }
 
   void next() {
-  #ifdef ZOMBIE_LINEAR_PROBING
+  #ifdef ABSL_ZOMBIE
     index_ += Width;
     offset_ += Width;
     offset_ &= mask_;
@@ -1204,10 +1204,19 @@ inline size_t NormalizeCapacity(size_t n) {
 // number of values we should put into the table before a resizing rehash.
 inline size_t CapacityToGrowth(size_t capacity) {
   assert(IsValidCapacity(capacity));
+  #ifndef ABSL_ZOMBIE
+    // `capacity*7/8`
+  if (Group::kWidth == 8 && capacity == 7) {
+    // x-x/8 does not work when x==7.
+    return 6;
+  }
+  return capacity - capacity / 8;
+  #else // Old Code
   // This determines rebuild window.
   // Why 0.975? This is for max load factor 0.95, when X=20
   // C(1-1/X) + C/2X = Capacity growth.
   return capacity * CX;
+  #endif
 }
 
 // Given `growth`, "unapplies" the load factor to find how large the capacity
@@ -3029,13 +3038,17 @@ private:
       drop_deletes_without_resize();
     } else {
       // Otherwise grow the container.
-      // resize(NextCapacity(cap));
-      #ifdef ZOMBIE_GRAVEYARD 
+      #ifndef ABSL_ZOMBIE 
+      // Old Code.
+      resize(NextCapacity(cap));
+      #elif ABSL_ZOMBIE_GRAVEYARD
+      // Graveyard - Clear and redistribute tombstones.
       // x=1/(1-lf), lf = 0.95, x = 20.
       // place a tombstone every n/4x position
       drop_deletes_without_resize_and_redistribute(80);
       printf("Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #else
+      // Standard Linear Probing: Clear all tombstones out.
       drop_deletes_without_resize();
       printf("No Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
       #endif
