@@ -2678,7 +2678,7 @@ class raw_hash_set {
   // Issues CPU prefetch instructions for the memory needed to find or insert
   // a key.  Like all lookup functions, this support heterogeneous keys.
   //
-  // NOTE: This is a very low level operation and should not #be used without
+  // NOTE: This is a very low level operation and should not be used without
   // specific benchmarks indicating its importance.
   template <class K = key_type>
   void prefetch(const key_arg<K>& key) const {
