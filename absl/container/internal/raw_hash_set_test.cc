@@ -1086,7 +1086,7 @@ TEST(Table, RedistributeTombstones) {
 #endif
 
 TEST(Table, ChurnTest) {
-  int hashTableCap = (1<<9)-1;
+  int hashTableCap = (1<<8)-1;
   int hashTableSize = (hashTableCap*96)/100;
 
   IntTable t;
@@ -1097,21 +1097,35 @@ TEST(Table, ChurnTest) {
   for(uint64_t i=0; i<hashTableSize; i++) {
     arr[i] = i+1;
     t.insert(arr[i]);
+    s.insert(arr[i]);
   }
 
   int arr_index = 0;
   for(int churn_round=0; churn_round < 100; churn_round++) {
-
     for(uint64_t i =0; i<(hashTableCap)/100; i++) {
       t.erase(arr[(arr_index+i) % hashTableSize]);
-      printf("ERASING: %d\n", arr[(arr_index+i)%hashTableSize]);
+      s.erase(arr[(arr_index+i) % hashTableSize]);
+      // printf("ERASING: %d\n", arr[(arr_index+i)%hashTableSize]);
     }
 
     for(uint64_t i =0; i<(hashTableCap)/100; i++) {
       arr[(arr_index+i) % hashTableSize] = random() % 1000; 
       t.insert(arr[(arr_index+i) % hashTableSize]);
-      printf("INSERTING: %d\n", arr[(arr_index+i)%hashTableSize]);
+      s.insert(arr[(arr_index+i) % hashTableSize]);
+      // printf("INSERTING: %d\n", arr[(arr_index+i)%hashTableSize]);
     }
+
+    // Broken for zombie_graveyard
+    for (int i=0; i<1000; i++) {
+      if (s.find(i) == s.end() && t.find(i) != t.end()) {
+        abort();
+      }
+      else if (s.find(i) != s.end() && t.find(i) == t.end()) {
+        abort();
+      }
+    }
+
+
     printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
     arr_index += (hashTableCap*1)/100;
   }
