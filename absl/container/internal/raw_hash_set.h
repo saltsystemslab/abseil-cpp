@@ -1839,6 +1839,12 @@ void DropDeletesWithoutResize(CommonFields& common,
 void RedistributeTombstones(CommonFields& common,
                               const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
 
+void DropDeletesWithoutResizeByClearingTombstones(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  void* tmp_space);
+
 // A SwissTable.
 //
 // Policy: a policy defines how to perform different operations on
@@ -2979,8 +2985,12 @@ class raw_hash_set {
   inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
     // Stack-allocate space for swapping elements.
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
+    #ifdef ABSL_ZOMBIE_GR_REBUILD_2_ROUND
     DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
     RedistributeTombstones(common(), GetPolicyFunctions(), tombstone_distance, tmp);
+    #elif ABSL_ZOMBIE_GR_REBUILD_1_ROUND
+    DropDeletesWithoutResizeByClearingTombstones(common(), GetPolicyFunctions(), 0, tmp);
+    #endif
     get_size();
   }
 
@@ -3047,8 +3057,9 @@ private:
       // Disable resizing.
       // x=1/(1-lf), lf = 0.95, x = 20.
       // place a tombstone every n/4x position
+      printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       drop_deletes_without_resize_and_redistribute(80);
-      printf("Redistribute: %lu %lu %lu\n", common().capacity(), common().TombstonesCount(), sizeof(slot_type));
+      printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       #else
       // Standard Tombstone clearing: Clear all tombstones out. Valid for both linear and quadratic probing.
       // Disable resizing.
@@ -3216,9 +3227,11 @@ private:
   // side-effect.
   //
   // See `CapacityToGrowth()`.
+  public:
   size_t growth_left() const { 
     return common().growth_left(); 
   }
+  private:
   void set_growth_left(size_t gl) { return common().set_growth_left(gl); }
 
   // Prefetch the heap-allocated memory region to resolve potential TLB and

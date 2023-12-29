@@ -141,92 +141,92 @@ static inline void* PrevSlot(void* slot, size_t slot_size) {
 }
 
 // Drops all tombstones and insert primitive tombsontes within a range.
-void DropDeletesWithoutResizeAndRedistributeTombstonesInWindow(
+void DropDeletesWithoutResizeByClearingTombstones(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  void* tmp_space) {
   // Algorithm:
   // - start, end are empty slots
+  // If not, we will scan ahead to find empty slots.
   // - for each slot marked as DELETED between start, end
   //     - find if there is a primitive tombstone spot not filled before
   //     - if there is, swap those elements.
   //     - else tombstone needs to be cleared
   //     - scan forward for a tombstone whose home slot is before this in next group.
   //     - and swap with that.
-  CommonFields& common,
-  const PolicyFunctions& policy, 
-  size_t start_offset,
-  size_t end_offset,
-  int primitive_tombstone_distance, 
-  void* tmp_space) {
 
   void* set = &common;
   void* slot_array = common.slot_array();
+  const size_t capacity = common.capacity();
   ctrl_t* ctrl = common.control();
   auto hasher = policy.hash_slot;
   auto transfer = policy.transfer;
   const size_t slot_size = policy.slot_size;
 
-  assert(IsEmpty(ctrl[start_offset]));
-  assert(IsEmpty(ctrl[end_offset]));
-  assert(end_offset > start_offset);
-
+  // Start from an empty slot.
+  // TODO: Use vectorized instructions here.
+  while (!IsEmpty(ctrl[start_offset])){
+    start_offset++;
+    if (start_offset == capacity) start_offset = 0;
+  }
+  printf("start: %lld\n", start_offset);
   void* slot_ptr = SlotAddress(slot_array, start_offset+1, slot_size);
-
-  size_t next_primitive_tombstone = start_offset + primitive_tombstone_distance;
-  void* primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
-  for (size_t i = start_offset+1; i < end_offset;
-       ++i, slot_ptr = NextSlot(slot_ptr, slot_size)) {
-      if (IsFull(ctrl[i])) continue;
-      if (IsEmpty(ctrl[i])) {
-        // Reset next_primitive_tombstone.
-        next_primitive_tombstone = i + primitive_tombstone_distance; 
-        primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
-        continue;
-      }
-      // We now have a tombstone that we should either clear or move to a primitive tombstone spot.
-      // If we should have left a primitive tombstone before, we should take this tombstone and make it primitive.
-      // The item in the primitive tombstone slot comes here.
-      if (i > next_primitive_tombstone && next_primitive_tombstone < end_offset) {
-        primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
-
-        // Copy the hash from the primitive tombstone spot..
-        const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
-        // And move it here.
-        SetCtrl(common, i, H2(hash), slot_size);
-        (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
-        // And finally mark the primitive tombstone spot as a tombstone.
-        SetCtrl(common, next_primitive_tombstone, ctrl_t::kDeleted, slot_size);
-
-        // Update the next primitive tombstone position.
-        next_primitive_tombstone += primitive_tombstone_distance;
+  size_t i = start_offset;
+  while (true) {
+      i++;
+      slot_ptr = NextSlot(slot_ptr, slot_size);
+      if (ctrl[i] == ctrl_t::kSentinel) {
+        i = 0;
+        slot_ptr = SlotAddress(slot_array, 0, slot_size);
       } 
-      // We should scan ahead and find an item to plug this tombstone.
-      else {
-        bool candidate_found = false;
-        size_t next_candidate = i+1;
-        void* next_candidate_ptr = SlotAddress(slot_array, next_candidate, slot_size);
+      if (i == start_offset) break; // Full scan complete.
 
-        // This is the part that worries me the most.., it seems really expensive...
-        for(; next_candidate < end_offset; next_candidate++, next_candidate_ptr = NextSlot(next_candidate_ptr, slot_size)) {
-          // TODO: As an optimization, only plug from items which are from next group.
-          if (IsEmpty(ctrl[next_candidate])) break;
-          if (IsDeleted(ctrl[next_candidate])) continue;
-          const size_t next_candidate_hash = (*hasher)(set, next_candidate_ptr);
-          const size_t next_candidate_probe_offset = probe(common, next_candidate_hash).offset();
-          if (next_candidate_probe_offset > i) continue;
+      // Check if not a tombstone.
+      if (IsFull(ctrl[i])) continue;
+      if (IsEmpty(ctrl[i])) continue;
 
-          // Else move that item here.
-          SetCtrl(common, i, H2(next_candidate_hash), slot_size);
-          (*transfer)(set, slot_ptr, next_candidate_ptr);
-          // Mark the candidate slot as a tombstone.
-          SetCtrl(common, next_candidate, ctrl_t::kDeleted, slot_size);
-          candidate_found = true;
+      bool candidate_found = false;
+      size_t next_candidate = i;
+      void* next_candidate_ptr = SlotAddress(slot_array, next_candidate, slot_size);
+      // Scan for an item to fill this tombstone.
+      while (true) {
+        next_candidate++;
+        next_candidate_ptr = NextSlot(next_candidate_ptr, slot_size);
+        if (ctrl[next_candidate] == ctrl_t::kSentinel) {
+          next_candidate = 0;
+          next_candidate_ptr = SlotAddress(slot_array, next_candidate, slot_size);
+        }
+        if (next_candidate == start_offset) {
+          // We have scanned the entire hashmap. 
+          // There is nothing that can clear this tombstone.
           break;
         }
-        // If no candidate was found, we can mark this as an empty slot.
-        if (!candidate_found) {
-          SetCtrl(common, i, ctrl_t::kEmpty, slot_size);
+        if (IsEmpty(ctrl[next_candidate])) break;
+        if (IsDeleted(ctrl[next_candidate])) continue;
+
+        const size_t next_candidate_hash = (*hasher)(set, next_candidate_ptr);
+        const size_t next_candidate_probe_offset = probe(common, next_candidate_hash).offset();
+        if (next_candidate_probe_offset > i) {
+          continue;
         }
+        // Else move that item here.
+        SetCtrl(common, i, H2(next_candidate_hash), slot_size);
+        (*transfer)(set, slot_ptr, next_candidate_ptr);
+        // Mark the candidate slot as a tombstone.
+        SetCtrl(common, next_candidate, ctrl_t::kDeleted, slot_size);
+        candidate_found = true;
+        break;
       }
+      // If no candidate was found, we can mark this as an empty slot.
+      if (!candidate_found) {
+        SetCtrl(common, i, ctrl_t::kEmpty, slot_size);
+      }
+
   }
+
+  
+  ResetGrowthLeft(common);
 }
 
 // Should be called right after DropDeletesWithoutResize.
@@ -281,7 +281,6 @@ void RedistributeTombstones(CommonFields& common,
         next_primitive_tombstone += tombstone_distance;
         primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
   }
-
 }
 
 void DropDeletesWithoutResize(CommonFields& common,

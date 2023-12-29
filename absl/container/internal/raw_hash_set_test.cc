@@ -1069,7 +1069,7 @@ struct Modulo1000HashTable
                           std::allocator<int>> {
 };
 
-#ifdef ABSL_ZOMBIE_GRAVEYARD
+#ifdef ABSL_ZOMBIE
 TEST(Table, RedistributeTombstones) {
   Modulo1000HashTable t;
   t.reserve(2047);
@@ -1081,9 +1081,42 @@ TEST(Table, RedistributeTombstones) {
 
   RawHashSetTestOnlyAccess::DropDeletesWithoutResizeAndRedistributeTombstones(t, 100);
   EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 10);
-
 };
+
 #endif
+
+TEST(Table, ChurnTest) {
+  int hashTableCap = (1<<9)-1;
+  int hashTableSize = (hashTableCap*96)/100;
+
+  IntTable t;
+  t.reserve(hashTableCap/2);
+
+  std::set<uint64_t> s;
+  uint64_t arr[hashTableSize];
+  for(uint64_t i=0; i<hashTableSize; i++) {
+    arr[i] = i+1;
+    t.insert(arr[i]);
+  }
+
+  int arr_index = 0;
+  for(int churn_round=0; churn_round < 100; churn_round++) {
+
+    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
+      t.erase(arr[(arr_index+i) % hashTableSize]);
+      printf("ERASING: %d\n", arr[(arr_index+i)%hashTableSize]);
+    }
+
+    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
+      arr[(arr_index+i) % hashTableSize] = random() % 1000; 
+      t.insert(arr[(arr_index+i) % hashTableSize]);
+      printf("INSERTING: %d\n", arr[(arr_index+i)%hashTableSize]);
+    }
+    printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
+    arr_index += (hashTableCap*1)/100;
+  }
+}
+
 
 // Test that rehash with no resize happen in case of many deleted slots.
 TEST(Table, RehashWithNoResize) {
