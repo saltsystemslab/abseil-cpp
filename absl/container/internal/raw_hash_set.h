@@ -658,6 +658,13 @@ struct GroupSse2Impl {
         _mm_movemask_epi8(_mm_cmpgt_epi8_fixed(special, ctrl))));
   }
 
+  // Returns a bitmask representing the positions of empty or deleted slots.
+  BitMask<uint16_t, kWidth> MaskEmptyOrDeletedIterable() const {
+    auto special = _mm_set1_epi8(static_cast<char>(ctrl_t::kSentinel));
+    return BitMask<uint16_t, kWidth>(static_cast<uint16_t>(
+        _mm_movemask_epi8(_mm_cmpgt_epi8_fixed(special, ctrl))));
+  }
+
   // Returns the number of trailing empty or deleted elements in the group.
   uint32_t CountLeadingEmptyOrDeleted() const {
     auto special = _mm_set1_epi8(static_cast<char>(ctrl_t::kSentinel));
@@ -1842,8 +1849,7 @@ void RedistributeTombstones(CommonFields& common,
 void DropDeletesWithoutResizeByClearingTombstones(
   CommonFields& common,
   const PolicyFunctions& policy, 
-  size_t start_offset,
-  void* tmp_space);
+  size_t start_offset);
 
 // A SwissTable.
 //
@@ -2984,12 +2990,12 @@ class raw_hash_set {
 
   inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
     // Stack-allocate space for swapping elements.
-    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     #ifdef ABSL_ZOMBIE_GR_REBUILD_2_ROUND
+    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
     RedistributeTombstones(common(), GetPolicyFunctions(), tombstone_distance, tmp);
     #elif ABSL_ZOMBIE_GR_REBUILD_1_ROUND
-    DropDeletesWithoutResizeByClearingTombstones(common(), GetPolicyFunctions(), 0, tmp);
+    DropDeletesWithoutResizeByClearingTombstones(common(), GetPolicyFunctions(), 0);
     #endif
     get_size();
   }

@@ -140,94 +140,170 @@ static inline void* PrevSlot(void* slot, size_t slot_size) {
   return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(slot) - slot_size);
 }
 
-// Drops all tombstones and insert primitive tombsontes within a range.
-void DropDeletesWithoutResizeByClearingTombstones(
+void probeDetails(
+  CommonFields& common,
+  const PolicyFunctions& policy) {
+  void* set = &common;
+  ctrl_t* ctrl = common.control();
+
+  for (size_t i=0; i<50; i++) {
+    if (ctrl[i] == ctrl_t::kEmpty) {
+      printf("E");
+    }
+    else if (ctrl[i] == ctrl_t::kDeleted) {
+      printf("T");
+    } else {
+      printf(".");
+    }
+  }
+  printf("\n");
+
+  for (size_t i=0; i<240; i++) {
+    probe_seq<Group::kWidth> seq(i, common.capacity());
+    while (true) {
+      GroupEmptyOrDeleted g{ctrl + seq.offset()};
+      if (g.MaskEmpty()) {
+        break;
+      }
+      seq.next();
+    }
+    printf("%ld: [%ld %ld]\n", i, i, seq.offset() + Group::kWidth);
+  }
+
+}
+
+
+void ClearTombstonesInRange(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset,
-  void* tmp_space) {
+  size_t end_offset) {
+  // Clear all tombstones between start and offset.
   // Algorithm:
-  // - start, end are empty slots
-  // If not, we will scan ahead to find empty slots.
-  // - for each slot marked as DELETED between start, end
-  //     - find if there is a primitive tombstone spot not filled before
-  //     - if there is, swap those elements.
-  //     - else tombstone needs to be cleared
-  //     - scan forward for a tombstone whose home slot is before this in next group.
-  //     - and swap with that.
-
+  // FOR each tombstone between [start_offset, end_offset] 
+  // - scan ahead to find an item that fits here.
+  // - if found, swap it in.
+  // - else mark it as empty
+  printf("Clearing all tombstones between: [%ld %ld]\n", start_offset, end_offset);
   void* set = &common;
-  void* slot_array = common.slot_array();
-  const size_t capacity = common.capacity();
   ctrl_t* ctrl = common.control();
+  void* slot_array = common.slot_array();
   auto hasher = policy.hash_slot;
   auto transfer = policy.transfer;
   const size_t slot_size = policy.slot_size;
+  const size_t capacity = common.capacity();
 
-  // Start from an empty slot.
-  // TODO: Use vectorized instructions here.
-  while (!IsEmpty(ctrl[start_offset])){
-    start_offset++;
-    if (start_offset == capacity) start_offset = 0;
-  }
-  printf("start: %lld\n", start_offset);
-  void* slot_ptr = SlotAddress(slot_array, start_offset+1, slot_size);
-  size_t i = start_offset;
-  while (true) {
-      i++;
-      slot_ptr = NextSlot(slot_ptr, slot_size);
-      if (ctrl[i] == ctrl_t::kSentinel) {
-        i = 0;
-        slot_ptr = SlotAddress(slot_array, 0, slot_size);
-      } 
-      if (i == start_offset) break; // Full scan complete.
 
-      // Check if not a tombstone.
-      if (IsFull(ctrl[i])) continue;
-      if (IsEmpty(ctrl[i])) continue;
+  void* candidate_ptr;
+  void* tombstone_ptr;
+  void* target_ptr;
+  size_t tombstone_slot;
+  size_t candidate_slot;
+  size_t candidate_hash;
+  size_t candidate_home_slot;
+  bool candidate_found;
+  bool candidate_search_end_found = false;
 
-      bool candidate_found = false;
-      size_t next_candidate = i;
-      void* next_candidate_ptr = SlotAddress(slot_array, next_candidate, slot_size);
-      // Scan for an item to fill this tombstone.
+  size_t candidate_search_end = end_offset + Group::kWidth;
+  size_t slot = start_offset;
+  while(common.TombstonesCount()!=0) {
+    if (IsDeleted(ctrl[slot])) {
+      tombstone_slot = slot;
+      tombstone_ptr = SlotAddress(slot_array, (tombstone_slot & capacity), slot_size);
+      candidate_slot = slot;
+      candidate_search_end_found = false; // We need to search till first empty spot + kWidth
+      candidate_search_end = -1;
+      candidate_found = false;
+      printf("Trying to clear %ld\n", slot);
       while (true) {
-        next_candidate++;
-        next_candidate_ptr = NextSlot(next_candidate_ptr, slot_size);
-        if (ctrl[next_candidate] == ctrl_t::kSentinel) {
-          next_candidate = 0;
-          next_candidate_ptr = SlotAddress(slot_array, next_candidate, slot_size);
-        }
-        if (next_candidate == start_offset) {
-          // We have scanned the entire hashmap. 
-          // There is nothing that can clear this tombstone.
-          break;
-        }
-        if (IsEmpty(ctrl[next_candidate])) break;
-        if (IsDeleted(ctrl[next_candidate])) continue;
+          candidate_slot++;
+          if (candidate_search_end_found && candidate_slot == candidate_search_end) {
+            break;
+          }
+          if (ctrl[candidate_slot] == ctrl_t::kSentinel) {
+            continue;
+          }
+          if(IsDeleted(ctrl[candidate_slot])) {
+            continue;
+          }
+          if(IsEmpty(ctrl[candidate_slot]) && !candidate_search_end_found) {
+            candidate_search_end_found = true;
+            candidate_search_end = candidate_slot + Group::kWidth;
+            continue;
+          }
+          // TODO: Use NextSlot here?
+          candidate_ptr = SlotAddress(slot_array, (candidate_slot & capacity), slot_size);
+          candidate_hash = (*hasher)(set, candidate_ptr);
+          candidate_home_slot = probe(common, candidate_hash).offset();
 
-        const size_t next_candidate_hash = (*hasher)(set, next_candidate_ptr);
-        const size_t next_candidate_probe_offset = probe(common, next_candidate_hash).offset();
-        if (next_candidate_probe_offset > i) {
-          continue;
+          // printf("  Checking candidate: %ld (HomeSlot: %ld)\n", (candidate_slot & capacity), candidate_home_slot);
+
+          // Does not handle wrap around yet.
+          if (candidate_home_slot <= tombstone_slot) {
+            printf("  Using %ld to plug %ld\n", candidate_slot, tombstone_slot);
+            // Transfer to new place.
+            SetCtrl(common, tombstone_slot, H2(candidate_hash), slot_size);
+            (*transfer)(set, tombstone_ptr, candidate_ptr);
+            SetCtrl(common, (candidate_slot & capacity), ctrl_t::kDeleted, slot_size);
+            candidate_found = true;
+            break;
+          }
         }
-        // Else move that item here.
-        SetCtrl(common, i, H2(next_candidate_hash), slot_size);
-        (*transfer)(set, slot_ptr, next_candidate_ptr);
-        // Mark the candidate slot as a tombstone.
-        SetCtrl(common, next_candidate, ctrl_t::kDeleted, slot_size);
-        candidate_found = true;
+        // Mark as empty.
+        if (!candidate_found) {
+          printf("Finally cleared a tombstone!!");
+          SetCtrl(common, tombstone_slot, ctrl_t::kEmpty, slot_size);
+        }
+      }
+    slot = (slot + 1) & capacity;
+  }
+}
+
+void DropDeletesWithoutResizeByClearingTombstones(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset) {
+    probeDetails(common, policy);
+  const size_t capacity = common.capacity();
+  ctrl_t* ctrl = common.control();
+  // Find the first slot after seq that has an empty.
+  size_t range_start = start_offset;
+  size_t range_end = start_offset;
+  probe_seq<Group::kWidth> seq(start_offset, capacity);
+  while (true) {
+    GroupEmptyOrDeleted g{ctrl + seq.offset()};
+    auto mask = g.MaskEmpty();
+    if (mask) {
+      range_start = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
+      break;
+    }
+    seq.next();
+    assert(seq.index() != start_offset && "full table!");
+  }
+  start_offset = range_start;
+
+  while (true) {
+    // Find the next empty group.
+    seq.next();
+    while (true) {
+      GroupEmptyOrDeleted g{ctrl + seq.offset()};
+      auto mask = g.MaskEmpty();
+      if (mask) {
+        range_end = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
         break;
       }
-      // If no candidate was found, we can mark this as an empty slot.
-      if (!candidate_found) {
-        SetCtrl(common, i, ctrl_t::kEmpty, slot_size);
-      }
-
+      seq.next();
+      assert(seq.index() != start_offset && "full table!");
+    }
+    ClearTombstonesInRange(common, policy, range_start, range_end);
+    range_start = range_end;
+    break;
+    // We've completed the full scan.
+    if (range_start == start_offset) break;
   }
-
-  
   ResetGrowthLeft(common);
 }
+
 
 // Should be called right after DropDeletesWithoutResize.
 // Scans the entire hash table and places a tombstone (deleted marker) every tombstone_distance spot.

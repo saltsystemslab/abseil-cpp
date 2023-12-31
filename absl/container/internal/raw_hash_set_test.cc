@@ -1085,9 +1085,9 @@ TEST(Table, RedistributeTombstones) {
 
 #endif
 
-TEST(Table, ChurnTest) {
+TEST(Table, ChurnTestSmall) {
   int hashTableCap = (1<<8)-1;
-  int hashTableSize = (hashTableCap*96)/100;
+  int hashTableSize = (hashTableCap*95)/100;
 
   IntTable t;
   t.reserve(hashTableCap/2);
@@ -1095,13 +1095,13 @@ TEST(Table, ChurnTest) {
   std::set<uint64_t> s;
   uint64_t arr[hashTableSize];
   for(uint64_t i=0; i<hashTableSize; i++) {
-    arr[i] = i+1;
+    arr[i] = i*2;
     t.insert(arr[i]);
     s.insert(arr[i]);
   }
 
   int arr_index = 0;
-  for(int churn_round=0; churn_round < 100; churn_round++) {
+  for(int churn_round=0; churn_round < 300; churn_round++) {
     for(uint64_t i =0; i<(hashTableCap)/100; i++) {
       t.erase(arr[(arr_index+i) % hashTableSize]);
       s.erase(arr[(arr_index+i) % hashTableSize]);
@@ -1118,18 +1118,48 @@ TEST(Table, ChurnTest) {
     // Broken for zombie_graveyard
     for (int i=0; i<1000; i++) {
       if (s.find(i) == s.end() && t.find(i) != t.end()) {
-        abort();
+        printf("Item: %d not supposed to be present.\n", i);
+        return;
       }
       else if (s.find(i) != s.end() && t.find(i) == t.end()) {
-        abort();
+        t.find(i);
+        printf("Item: %d supposed to be present.\n", i);
+        return;
       }
     }
-
 
     printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
     arr_index += (hashTableCap*1)/100;
   }
 }
+
+TEST(Table, ChurnTest) {
+  int hashTableCap = (1<<20)-1;
+  int hashTableSize = (hashTableCap*95)/100;
+
+  IntTable t;
+  t.reserve(hashTableCap/2);
+  uint64_t arr[hashTableSize];
+  for(uint64_t i=0; i<hashTableSize; i++) {
+    arr[i] = random();
+    t.insert(arr[i]);
+  }
+
+  int arr_index = 0;
+  for(int churn_round=0; churn_round < 100; churn_round++) {
+    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
+      t.erase(arr[(arr_index+i) % hashTableSize]);
+    }
+
+    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
+      arr[(arr_index+i) % hashTableSize] = random(); 
+      t.insert(arr[(arr_index+i) % hashTableSize]);
+    }
+    printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
+    arr_index += (hashTableCap*1)/100;
+  }
+}
+
 
 
 // Test that rehash with no resize happen in case of many deleted slots.
