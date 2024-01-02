@@ -1085,31 +1085,42 @@ TEST(Table, RedistributeTombstones) {
 
 #endif
 
+#define INS 0
+#define DEL 1
+
 TEST(Table, ChurnTestSmall) {
-  int hashTableCap = (1<<8)-1;
+  int hashTableCap = (1<<10)-1;
   int hashTableSize = (hashTableCap*95)/100;
 
+  size_t seed = time(NULL);
+  // size_t seed = 1704220960;
+  // size_t seed = 1704222519;
+  srand(seed);
+  printf("SEED: %ld\n", seed);
   IntTable t;
   t.reserve(hashTableCap/2);
 
   std::set<uint64_t> s;
   uint64_t arr[hashTableSize];
   for(uint64_t i=0; i<hashTableSize; i++) {
+    //fprintf(fp, "%d %ld\n", INS, i*2);
     arr[i] = i*2;
     t.insert(arr[i]);
     s.insert(arr[i]);
   }
 
   int arr_index = 0;
-  for(int churn_round=0; churn_round < 300; churn_round++) {
-    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
+  for(int churn_round=0; churn_round < 3000; churn_round++) {
+    for(uint64_t i =0; i<(hashTableCap * 2)/100; i++) {
+      //fprintf(fp, "%d %ld\n", DEL, arr[(arr_index+i)]);
       t.erase(arr[(arr_index+i) % hashTableSize]);
       s.erase(arr[(arr_index+i) % hashTableSize]);
       // printf("ERASING: %d\n", arr[(arr_index+i)%hashTableSize]);
     }
 
-    for(uint64_t i =0; i<(hashTableCap)/100; i++) {
-      arr[(arr_index+i) % hashTableSize] = random() % 1000; 
+    for(uint64_t i =0; i<(hashTableCap * 2)/100; i++) {
+      arr[(arr_index+i) % hashTableSize]; 
+      //fprintf(fp, "%d %ld\n", INS, arr[(arr_index+i)]);
       t.insert(arr[(arr_index+i) % hashTableSize]);
       s.insert(arr[(arr_index+i) % hashTableSize]);
       // printf("INSERTING: %d\n", arr[(arr_index+i)%hashTableSize]);
@@ -1129,7 +1140,7 @@ TEST(Table, ChurnTestSmall) {
     }
 
     // printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
-    arr_index += (hashTableCap*1)/100;
+    arr_index += (hashTableCap*2)/100;
   }
 }
 
@@ -1141,7 +1152,7 @@ TEST(Table, ChurnTest) {
   t.reserve(hashTableCap/2);
   uint64_t arr[hashTableSize];
   for(uint64_t i=0; i<hashTableSize; i++) {
-    arr[i] = random();
+    arr[i] = rand();
     t.insert(arr[i]);
   }
 

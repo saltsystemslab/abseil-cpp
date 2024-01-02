@@ -167,17 +167,22 @@ bool find_key(
 bool checkAllReachable(
   CommonFields& common,
   const PolicyFunctions& policy) {
-    return true;
   void* set = &common;
   ctrl_t* ctrl = common.control();
   void* slot_array = common.slot_array();
   auto hasher = policy.hash_slot;
   const size_t slot_size = policy.slot_size;
 
+  // printf(" Tombstone Count: %ld\n", common.TombstonesCount());
   for (size_t i=0; i<common.capacity(); i++) {
-    if (!IsFull(ctrl[i])) continue;
+    if (ctrl[i]==ctrl_t::kDeleted || ctrl[i]==ctrl_t::kEmpty) {
+      continue;
+    }
     void* target_ptr = SlotAddress(slot_array, i, slot_size);
-    assert(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true);
+    if(!(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
+      printf("Failed in checkAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
+      assert(false);
+    }
   }
 }
 
@@ -192,9 +197,9 @@ void ClearTombstonesInRange(
   // - scan ahead to find an item that fits here.
   // - if found, swap it in.
   // - else mark it as empty
+  // TODO: For now we clear all tombstones, just to check for correctness.
   size_t outerProbeLength = 0;
   size_t innerProbeLength = 0;
-  printf("Clearing all tombstones between: [%ld %ld]\n", start_offset, end_offset);
   void* set = &common;
   ctrl_t* ctrl = common.control();
   void* slot_array = common.slot_array();
@@ -213,9 +218,11 @@ void ClearTombstonesInRange(
   bool candidate_found;
   bool candidate_search_end_found = false;
 
+  checkAllReachable(common, policy);
+
   size_t candidate_search_end = end_offset + Group::kWidth;
   size_t slot = start_offset;
-  // TODO: FOR NOW WE CLEAR ALL TOMBSTONES, JUST TO CHECK FOR CORRECTNESS.
+  // TODO: For now we clear all tombstones, just to check for correctness.
   while(common.TombstonesCount()!=0) {
     outerProbeLength++;
     if (ctrl[slot] == ctrl_t::kSentinel) {
@@ -224,7 +231,10 @@ void ClearTombstonesInRange(
     if (IsFull(ctrl[slot])) {
       tombstone_slot = slot;
       tombstone_ptr = SlotAddress(slot_array, (tombstone_slot & capacity), slot_size);
-      assert(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==true);
+
+      if(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
+        // printf("lost value somehow: %ld\n", *(size_t *)(tombstone_ptr));
+      }
     }
     if (IsDeleted(ctrl[slot])) {
       tombstone_slot = slot;
@@ -235,8 +245,16 @@ void ClearTombstonesInRange(
       candidate_found = false;
 
       bool wrapped_around = false;
+      size_t scan_length = 0;
       // printf("Trying to clear %ld\n", slot);
       while (true) {
+          scan_length++;
+          if (scan_length > 2 * capacity) {
+            // We've gone around twice, that doesn't make sense!
+            // If there was an empty, we should have stopped.
+            // This should not be hit anymore.
+            abort();
+          }
           innerProbeLength++;
           candidate_slot++;
           if (candidate_search_end_found && candidate_slot == candidate_search_end) {
@@ -245,18 +263,21 @@ void ClearTombstonesInRange(
           }
           if (ctrl[candidate_slot] == ctrl_t::kSentinel) {
             wrapped_around = true;
+            // printf("  Wrapped around! %ld\n", candidate_slot);
+            checkAllReachable(common, policy);
+            SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
             continue;
           }
-          if(IsDeleted(ctrl[candidate_slot])) {
+          if(IsDeleted(ctrl[candidate_slot & capacity])) {
             continue;
           }
-          if(IsEmpty(ctrl[candidate_slot]) && !candidate_search_end_found) {
+          if(IsEmpty(ctrl[candidate_slot & capacity]) && !candidate_search_end_found) {
             // printf("Skipping over an empty: %ld\n", candidate_slot);
             candidate_search_end_found = true;
             candidate_search_end = candidate_slot + Group::kWidth;
             continue;
           }
-          if (IsEmpty(ctrl[candidate_slot])) {
+          if (IsEmpty(ctrl[candidate_slot & capacity])) {
             continue;
           }
           // TODO: Use NextSlot here?
@@ -264,35 +285,29 @@ void ClearTombstonesInRange(
           candidate_hash = (*hasher)(set, candidate_ptr);
           candidate_home_slot = probe(common, candidate_hash).offset();
 
-          // Does not handle wrap around yet.
           if (candidate_home_slot <= tombstone_slot)  {
             if (wrapped_around) {
-              // Do a search and see if it lands here.
-              // Mark candidate as deleted, and do a find_first_non_full
-
-              SetCtrl(common, (candidate_slot & capacity), ctrl_t::kDeleted, slot_size);
-              assert(IsDeleted(ctrl[candidate_slot & capacity]));
-              const FindInfo find_info = find_first_non_full(common, candidate_hash);
-              target_ptr = SlotAddress(slot_array, find_info.offset, slot_size);
-              (*transfer)(set, target_ptr, candidate_ptr);
-              SetCtrl(common, find_info.offset, H2(candidate_hash), slot_size);
-              // printf(" Plugging %ld using %ld (HS: %ld) (after wrap)\n", find_info.offset, candidate_home_slot, slot_size);
-
-              assert(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true);
-              if (find_info.offset == tombstone_slot) {
-                candidate_found = true;
-                break;
+              // If you can still find the key, skip it.
+              if (find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr))) {
+                continue;
+              } else {
+                // printf("Using Skipping %ld (homeSlot:%ld)\n", candidate_slot, candidate_home_slot);
+                SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kDeleted, slot_size);
+                assert(find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr)) == true);
+                SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
+                find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr));
               }
-              continue;
             }
             // Transfer to new place
-            SetCtrl(common, tombstone_slot, H2(candidate_hash), slot_size);
+            // printf("  Before TC: %ld\n", common.TombstonesCount());
+            SetCtrl(common, (tombstone_slot & capacity), H2(candidate_hash), slot_size);
             (*transfer)(set, tombstone_ptr, candidate_ptr);
             SetCtrl(common, (candidate_slot & capacity), ctrl_t::kDeleted, slot_size);
+            // printf("  TC: %ld\n", common.TombstonesCount());
             // printf("  Using %ld to plug %ld value (homeslot: %ld): %ld\n", candidate_slot, tombstone_slot, candidate_home_slot, *(size_t *)candidate_ptr);
             candidate_found = true;
             if(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
-              // printf("%ld lost!\n", *(size_t *)tombstone_ptr);
+               // printf("%ld lost!\n", *(size_t *)tombstone_ptr);
               assert(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==true);
             }
             break;
@@ -301,13 +316,18 @@ void ClearTombstonesInRange(
         // Mark as empty.
         if (!candidate_found) {
           // printf("Finally cleared a tombstone!!\n");
-          SetCtrl(common, tombstone_slot, ctrl_t::kEmpty, slot_size);
+          checkAllReachable(common, policy);
+          SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
+          checkAllReachable(common, policy);
+        } else if (!candidate_found && wrapped_around) {
+          SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kDeleted, slot_size);
           checkAllReachable(common, policy);
         }
       }
     slot = (slot + 1) & capacity;
   }
   printf("outerProbeLength: %ld innerProbeLength: %ld\n", outerProbeLength, innerProbeLength);
+  checkAllReachable(common, policy);
 }
 
 void DropDeletesWithoutResizeByClearingTombstones(
