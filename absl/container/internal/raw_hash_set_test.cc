@@ -1128,7 +1128,7 @@ TEST(Table, ChurnTestSmall) {
       }
     }
 
-    printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
+    // printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
     arr_index += (hashTableCap*1)/100;
   }
 }
