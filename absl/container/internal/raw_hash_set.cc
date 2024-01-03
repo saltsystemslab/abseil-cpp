@@ -198,8 +198,9 @@ void ClearTombstonesInRange(
   // - if found, swap it in.
   // - else mark it as empty
   // TODO: For now we clear all tombstones, just to check for correctness.
-  size_t outerProbeLength = 0;
-  size_t innerProbeLength = 0;
+  // Leaving in a lot of comments to help with debugging.
+  // size_t outerProbeLength = 0;
+  // size_t innerProbeLength = 0;
   void* set = &common;
   ctrl_t* ctrl = common.control();
   void* slot_array = common.slot_array();
@@ -210,124 +211,124 @@ void ClearTombstonesInRange(
 
   void* candidate_ptr;
   void* tombstone_ptr;
-  void* target_ptr;
+  // void* target_ptr;
   size_t tombstone_slot;
   size_t candidate_slot;
   size_t candidate_hash;
   size_t candidate_home_slot;
   bool candidate_found;
-  bool candidate_search_end_found = false;
 
-  checkAllReachable(common, policy);
+  assert(ctrl[start_offset] == ctrl_t::kEmpty);
+  assert(ctrl[end_offset] == ctrl_t::kEmpty);
+  // printf("Clearing [%ld %ld] TC: %ld\n", start_offset, end_offset, common.TombstonesCount());
+  // checkAllReachable(common, policy);
 
-  size_t candidate_search_end = end_offset + Group::kWidth;
+  // all items will have their homeslot between [candidate_hs_start, candidate_search_end].
+  size_t candidate_hs_start = (start_offset - Group::kWidth) & capacity;
+  size_t candidate_search_end = (end_offset + Group::kWidth) & capacity;
+
+  // For every item we scan forward, it's home slot should lie between
+  // [candidate_hs_start, tombstone] for it to be considered as a replacement
+  // if tombstone < candidiate_hs_starrt, then that range is discontinous (wraps around).
+  bool range_broken = start_offset < Group::kWidth;
+
   size_t slot = start_offset;
-  // TODO: For now we clear all tombstones, just to check for correctness.
-  while(common.TombstonesCount()!=0) {
-    outerProbeLength++;
+  while(slot != end_offset) {
+    // checkAllReachable(common, policy);
+    // outerProbeLength++;
     if (ctrl[slot] == ctrl_t::kSentinel) {
-      slot = (slot + 1) & capacity;
+      slot++;
+      slot = slot & capacity;
+      range_broken = true;
+      continue;
     }
+    #if 0
     if (IsFull(ctrl[slot])) {
-      tombstone_slot = slot;
-      tombstone_ptr = SlotAddress(slot_array, (tombstone_slot & capacity), slot_size);
-
-      if(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
-        // printf("lost value somehow: %ld\n", *(size_t *)(tombstone_ptr));
+      target_ptr = SlotAddress(slot_array, (slot & capacity), slot_size);
+      const size_t target_hash = (*hasher)(slot_array, target_ptr);
+      const size_t target_home_slot = probe(common, target_hash).offset();
+      if (candidate_search_end < candidate_search_end) {
+        assert(target_home_slot >= candidate_search_end && target_home_slot <= candidate_search_end);
+      } else {
+        assert(target_home_slot >= candidate_search_end || target_home_slot <= candidate_search_end);
+      }
+      
+      if(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==false) {
+        printf("lost value somehow: %ld\n", *(size_t *)(target_ptr));
+        assert(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true);
       }
     }
+    #endif
     if (IsDeleted(ctrl[slot])) {
       tombstone_slot = slot;
       tombstone_ptr = SlotAddress(slot_array, (tombstone_slot & capacity), slot_size);
-      candidate_slot = slot;
-      candidate_search_end_found = false; // We need to search till first empty spot + kWidth
-      candidate_search_end = -1;
-      candidate_found = false;
 
-      bool wrapped_around = false;
-      size_t scan_length = 0;
-      // printf("Trying to clear %ld\n", slot);
+      candidate_slot = slot;
+      candidate_found = false;
+      // size_t scan_length = 0;
+      // printf("Trying to clear %ld [%ld %ld]\n", slot, candidate_hs_start, candidate_search_end);
       while (true) {
-          scan_length++;
-          if (scan_length > 2 * capacity) {
-            // We've gone around twice, that doesn't make sense!
-            // If there was an empty, we should have stopped.
-            // This should not be hit anymore.
-            abort();
-          }
-          innerProbeLength++;
+          // innerProbeLength++;
           candidate_slot++;
-          if (candidate_search_end_found && candidate_slot == candidate_search_end) {
+          candidate_slot = candidate_slot & capacity;
+          if (candidate_slot == candidate_search_end) {
             // printf("Breaking because end found!\n");
             break;
           }
-          if (ctrl[candidate_slot] == ctrl_t::kSentinel) {
-            wrapped_around = true;
+          if (ctrl[candidate_slot & capacity] == ctrl_t::kSentinel) {
             // printf("  Wrapped around! %ld\n", candidate_slot);
-            checkAllReachable(common, policy);
-            SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
+            // checkAllReachable(common, policy);
+            // SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
             continue;
           }
           if(IsDeleted(ctrl[candidate_slot & capacity])) {
             continue;
           }
-          if(IsEmpty(ctrl[candidate_slot & capacity]) && !candidate_search_end_found) {
+          if(IsEmpty(ctrl[candidate_slot & capacity])) {
             // printf("Skipping over an empty: %ld\n", candidate_slot);
-            candidate_search_end_found = true;
-            candidate_search_end = candidate_slot + Group::kWidth;
+            // candidate_search_end = candidate_slot + Group::kWidth;
             continue;
           }
-          if (IsEmpty(ctrl[candidate_slot & capacity])) {
-            continue;
-          }
-          // TODO: Use NextSlot here?
           candidate_ptr = SlotAddress(slot_array, (candidate_slot & capacity), slot_size);
           candidate_hash = (*hasher)(set, candidate_ptr);
           candidate_home_slot = probe(common, candidate_hash).offset();
-
-          if (candidate_home_slot <= tombstone_slot)  {
-            if (wrapped_around) {
-              // If you can still find the key, skip it.
-              if (find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr))) {
-                continue;
-              } else {
-                // printf("Using Skipping %ld (homeSlot:%ld)\n", candidate_slot, candidate_home_slot);
-                SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kDeleted, slot_size);
-                assert(find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr)) == true);
-                SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
-                find_key(common, policy, *(size_t *)candidate_ptr, (*hasher)(set, candidate_ptr));
-              }
-            }
+          bool viable_candidate;
+          if (range_broken) {
+            viable_candidate = (candidate_home_slot > candidate_hs_start || candidate_home_slot <= tombstone_slot);
+          } else {
+            viable_candidate = (candidate_home_slot > candidate_hs_start && candidate_home_slot <= tombstone_slot);
+          }
+          if (viable_candidate)  {
             // Transfer to new place
             // printf("  Before TC: %ld\n", common.TombstonesCount());
             SetCtrl(common, (tombstone_slot & capacity), H2(candidate_hash), slot_size);
             (*transfer)(set, tombstone_ptr, candidate_ptr);
             SetCtrl(common, (candidate_slot & capacity), ctrl_t::kDeleted, slot_size);
+            candidate_found = true;
             // printf("  TC: %ld\n", common.TombstonesCount());
             // printf("  Using %ld to plug %ld value (homeslot: %ld): %ld\n", candidate_slot, tombstone_slot, candidate_home_slot, *(size_t *)candidate_ptr);
-            candidate_found = true;
+            #if 0
             if(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
                // printf("%ld lost!\n", *(size_t *)tombstone_ptr);
               assert(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==true);
             }
+            #endif
             break;
           }
         }
         // Mark as empty.
         if (!candidate_found) {
           // printf("Finally cleared a tombstone!!\n");
-          checkAllReachable(common, policy);
+          // checkAllReachable(common, policy);
           SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
-          checkAllReachable(common, policy);
-        } else if (!candidate_found && wrapped_around) {
-          SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kDeleted, slot_size);
-          checkAllReachable(common, policy);
-        }
+          // checkAllReachable(common, policy);
+        }       
       }
-    slot = (slot + 1) & capacity;
+      slot++;
+      slot = slot & capacity;
   }
-  printf("outerProbeLength: %ld innerProbeLength: %ld\n", outerProbeLength, innerProbeLength);
-  checkAllReachable(common, policy);
+  // printf("outerProbeLength: %ld innerProbeLength: %ld\n", outerProbeLength, innerProbeLength);
+  // checkAllReachable(common, policy);
 }
 
 void DropDeletesWithoutResizeByClearingTombstones(
@@ -368,7 +369,6 @@ void DropDeletesWithoutResizeByClearingTombstones(
     }
     ClearTombstonesInRange(common, policy, range_start, range_end);
     range_start = range_end;
-    break;
     // We've completed the full scan.
     if (range_start == start_offset) break;
   }
