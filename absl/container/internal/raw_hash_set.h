@@ -1190,6 +1190,7 @@ inline size_t NextCapacity(size_t n) {
 //   ctrl[capacity] == ctrl_t::kSentinel
 //   ctrl[i] != ctrl_t::kSentinel for all i < capacity
 void ConvertDeletedToEmptyAndFullToDeleted(ctrl_t* ctrl, size_t capacity);
+void ConvertDeletedToEmptyAndFullToDeleted(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity);
 
 // Converts `n` into the next valid capacity, per `IsValidCapacity`.
 inline size_t NormalizeCapacity(size_t n) {
@@ -1846,7 +1847,7 @@ void DropDeletesWithoutResize(CommonFields& common,
 void RedistributeTombstones(CommonFields& common,
                               const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
 
-void DropDeletesWithoutResizeByClearingTombstones(
+void DropDeletesWithoutResizeByRebuildingRanges(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset);

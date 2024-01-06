@@ -121,6 +121,28 @@ void ConvertDeletedToEmptyAndFullToDeleted(ctrl_t* ctrl, size_t capacity) {
   std::memcpy(ctrl + capacity + 1, ctrl, NumClonedBytes());
   ctrl[capacity] = ctrl_t::kSentinel;
 }
+
+void ConvertDeletedToEmptyAndFullToDeleted(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity) {
+  assert(ctrl[capacity] == ctrl_t::kSentinel);
+  assert(IsValidCapacity(capacity));
+  size_t pos = start_offset;
+  while (true) {
+    if ((end_offset & Group::kWidth) == (pos & Group::kWidth)) break;
+    Group{ctrl + pos}.ConvertSpecialToEmptyAndFullToDeleted(ctrl + pos);
+    pos = pos + Group::kWidth;
+    pos = pos & capacity;
+  }
+  while (pos != end_offset + Group::kWidth) {
+    if (ctrl[pos] == ctrl_t::kDeleted) ctrl[pos] = ctrl_t::kEmpty;
+    else if (ctrl[pos] != ctrl_t::kDeleted) ctrl[pos] = ctrl_t::kDeleted;
+    pos = pos + 1;
+    pos = pos & capacity;
+  }
+  // Copy the cloned ctrl bytes.
+  std::memcpy(ctrl + capacity + 1, ctrl, NumClonedBytes());
+  ctrl[capacity] = ctrl_t::kSentinel;
+}
+
 // Extern template instantiation for inline function.
 template FindInfo find_first_non_full(const CommonFields&, size_t);
 
@@ -184,9 +206,95 @@ bool checkAllReachable(
       assert(false);
     }
   }
+  return true;
 }
 
-void ClearTombstonesInRange(
+void ClearTombstonesInRangeByRehashing(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  size_t end_offset) {
+  void* set = &common;
+  void* slot_array = common.slot_array();
+  const size_t capacity = common.capacity();
+  assert(IsValidCapacity(capacity));
+  assert(!is_small(capacity));
+  // Algorithm:
+  // - mark all DELETED slots as EMPTY
+  // - mark all FULL slots as DELETED (There are no full slots at this point, only empties and tombstones. tombstones represent items.)
+  // - for each slot marked as DELETED  (basically for each item)
+  //     hash = Hash(element)
+  //     target = find_first_non_full(hash)
+  //     if target is in the same group
+  //       mark slot as FULL
+  //     else if target is EMPTY (move item back)
+  //       transfer element to target
+  //       mark slot as EMPTY
+  //       mark target as FULL
+  //     else if target is DELETED
+  //       swap current element with target element
+  //       mark target as FULL
+  //       repeat procedure for current slot with moved from element (target)
+  ctrl_t* ctrl = common.control();
+  const size_t slot_size = policy.slot_size;
+  auto hasher = policy.hash_slot;
+  auto transfer = policy.transfer;
+  size_t end_lim = (end_offset + Group::kWidth) & capacity;
+  ConvertDeletedToEmptyAndFullToDeleted(ctrl, start_offset, end_lim, capacity);
+
+  // Check no full items between start_offset and end_offset.
+  size_t tpos = start_offset;
+  while (tpos != end_lim) {
+    assert(ctrl[tpos] == ctrl_t::kEmpty || ctrl[tpos] == ctrl_t::kDeleted);
+    tpos++;
+    tpos = tpos & capacity;
+  }
+
+  size_t pos = 0;
+  void* slot_ptr = SlotAddress(slot_array, pos, slot_size);
+  while (true) {
+    pos = pos + 1;
+    slot_ptr = NextSlot(slot_array, slot_size);
+    if (pos == capacity) {
+      pos = 0;
+      slot_ptr = SlotAddress(slot_array, pos, slot_size);
+    }
+    if (ABSL_PREDICT_FALSE(ctrl[pos] == ctrl_t::kSentinel)) {
+      pos = 0;
+      slot_ptr = SlotAddress(slot_array, pos, slot_size);
+    }
+
+    assert(slot_ptr == SlotAddress(slot_array, pos, slot_size));
+    if (!IsDeleted(ctrl[pos]))continue;
+    const size_t hash = (*hasher)(set, slot_ptr);
+    const FindInfo target = find_first_non_full(common, hash);
+    const size_t new_i = target.offset;
+    const size_t probe_offset = probe(common, hash).offset();
+    const auto probe_index = [probe_offset, capacity](size_t pos) {
+      return ((pos - probe_offset) & capacity) / Group::kWidth;
+    };
+
+    // Element doesn't move.
+    if (ABSL_PREDICT_TRUE(probe_index(new_i) == probe_index(pos))) {
+      SetCtrl(common, pos, H2(hash), slot_size);
+      continue;
+    }
+
+    void* new_slot_ptr = SlotAddress(slot_array, new_i, slot_size);
+    if (IsEmpty(ctrl[new_i])) {
+      // Transfer element to the empty spot.
+      // SetCtrl poisons/unpoisons the slots so we have to call it at the
+      // right time.
+      SetCtrl(common, new_i, H2(hash), slot_size);
+      (*transfer)(set, new_slot_ptr, slot_ptr);
+      SetCtrl(common, pos, ctrl_t::kEmpty, slot_size);
+    } else {
+      abort();
+    }
+  }
+}
+
+void ClearTombstonesInRangeByPushing(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset,
@@ -267,6 +375,7 @@ void ClearTombstonesInRange(
       candidate_found = false;
       // size_t scan_length = 0;
       // printf("Trying to clear %ld [%ld %ld]\n", slot, candidate_hs_start, candidate_search_end);
+      // Push Tombstone.
       while (true) {
           // innerProbeLength++;
           candidate_slot++;
@@ -331,7 +440,7 @@ void ClearTombstonesInRange(
   // checkAllReachable(common, policy);
 }
 
-void DropDeletesWithoutResizeByClearingTombstones(
+void DropDeletesWithoutResizeByRebuildingRanges(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset) {
@@ -367,7 +476,17 @@ void DropDeletesWithoutResizeByClearingTombstones(
       seq.next();
       assert(seq.index() != start_offset && "full table!");
     }
-    ClearTombstonesInRange(common, policy, range_start, range_end);
+    ClearTombstonesInRangeByPushing(common, policy, range_start, range_end);
+    #if 0
+    #if defined(ABSL_ZOMBIE_REBUILD_CLEAR_BY_REHASHING)
+    printf("Cleared by rehashing!\n");
+    ClearTombstonesInRangeByRehashing(common, policy, range_start, range_end);
+    #elif defined(ABSL_ZOMBIE_REBUILD_CLEAR_BY_PUSHING)
+    ClearTombstonesInRangeByPushing(common, policy, range_start, range_end);
+    #else
+    abort();
+    #endif
+    #endif
     range_start = range_end;
     // We've completed the full scan.
     if (range_start == start_offset) break;
@@ -439,13 +558,13 @@ void DropDeletesWithoutResize(CommonFields& common,
   assert(!is_small(capacity));
   // Algorithm:
   // - mark all DELETED slots as EMPTY
-  // - mark all FULL slots as DELETED
-  // - for each slot marked as DELETED
+  // - mark all FULL slots as DELETED (There are no full slots at this point, only empties and tombstones. tombstones represent items.)
+  // - for each slot marked as DELETED  (basically for each item)
   //     hash = Hash(element)
   //     target = find_first_non_full(hash)
   //     if target is in the same group
   //       mark slot as FULL
-  //     else if target is EMPTY
+  //     else if target is EMPTY (move item back)
   //       transfer element to target
   //       mark slot as EMPTY
   //       mark target as FULL
@@ -453,6 +572,7 @@ void DropDeletesWithoutResize(CommonFields& common,
   //       swap current element with target element
   //       mark target as FULL
   //       repeat procedure for current slot with moved from element (target)
+  //
   ctrl_t* ctrl = common.control();
   ConvertDeletedToEmptyAndFullToDeleted(ctrl, capacity);
   auto hasher = policy.hash_slot;

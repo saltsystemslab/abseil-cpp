@@ -1089,7 +1089,7 @@ TEST(Table, RedistributeTombstones) {
 #define DEL 1
 
 TEST(Table, ChurnTestSmall) {
-  int hashTableCap = (1<<10)-1;
+  int hashTableCap = (1<<8)-1;
   int hashTableSize = (hashTableCap*95)/100;
 
   size_t seed = time(NULL);
@@ -1119,7 +1119,7 @@ TEST(Table, ChurnTestSmall) {
     }
 
     for(uint64_t i =0; i<(hashTableCap * 2)/100; i++) {
-      arr[(arr_index+i) % hashTableSize]; 
+      arr[(arr_index+i) % hashTableSize] = random() % 1000; 
       //fprintf(fp, "%d %ld\n", INS, arr[(arr_index+i)]);
       t.insert(arr[(arr_index+i) % hashTableSize]);
       s.insert(arr[(arr_index+i) % hashTableSize]);
