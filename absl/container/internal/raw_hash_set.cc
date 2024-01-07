@@ -172,10 +172,54 @@ bool checkAllReachable(
   void* slot_array = common.slot_array();
   auto hasher = policy.hash_slot;
   const size_t slot_size = policy.slot_size;
+  size_t item_count = 0;
 
   // printf(" Tombstone Count: %ld\n", common.TombstonesCount());
   for (size_t i=0; i<common.capacity(); i++) {
     if (ctrl[i]==ctrl_t::kDeleted || ctrl[i]==ctrl_t::kEmpty) {
+      continue;
+    }
+    item_count++;
+    void* target_ptr = SlotAddress(slot_array, i, slot_size);
+    if(!(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
+      printf("Failed in checkAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
+      assert(false);
+    }
+  }
+
+  assert(item_count == common.size());
+  // printf("AllReachable!\n");
+  return true;
+}
+
+bool checkRangeReachable(
+  CommonFields& common,
+  const PolicyFunctions& policy,
+  size_t start_offset,
+  size_t end_offset) {
+  void* set = &common;
+  ctrl_t* ctrl = common.control();
+  void* slot_array = common.slot_array();
+  auto hasher = policy.hash_slot;
+  const size_t slot_size = policy.slot_size;
+
+  size_t tc_count = 0;
+  size_t empty_count = 0;
+  size_t count = 0;
+
+  // printf(" Tombstone Count: %ld\n", common.TombstonesCount());
+  for (size_t i=start_offset; i!=end_offset; i++) {
+    if (i==common.capacity()) {
+      i = -1;
+      continue;
+    }
+    count++;
+    if (ctrl[i]==ctrl_t::kDeleted) {
+      tc_count++;
+      continue;
+    } else if (ctrl[i]==ctrl_t::kEmpty) {
+      // printf("   %ld empty\n", i);
+      empty_count++;
       continue;
     }
     void* target_ptr = SlotAddress(slot_array, i, slot_size);
@@ -184,6 +228,209 @@ bool checkAllReachable(
       assert(false);
     }
   }
+  // printf("Range: %ld tc: %ld empty: %ld\n", count, tc_count, empty_count);
+  return true;
+}
+
+void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity) {
+  assert(ctrl[capacity] == ctrl_t::kSentinel);
+  assert(IsValidCapacity(capacity));
+  size_t end_pos = end_offset - Group::kWidth;
+  if (end_offset < Group::kWidth) {
+    end_pos = 0;
+  }
+  size_t pos = start_offset;
+  while (pos < end_pos) {
+    Group{ctrl + pos}.ConvertSpecialToEmptyAndFullToDeleted(ctrl + pos);
+    pos = pos + Group::kWidth;
+    pos = pos & capacity;
+  }
+
+  while (pos != end_offset) {
+    if (ctrl[pos] == ctrl_t::kSentinel) {
+      pos = 0;
+      continue;
+    }
+    if (ctrl[pos] == ctrl_t::kDeleted) ctrl[pos] = ctrl_t::kEmpty;
+    else if (ctrl[pos] != ctrl_t::kEmpty) ctrl[pos] = ctrl_t::kDeleted;
+    pos = pos + 1;
+  }
+  // Copy the cloned ctrl bytes.
+  std::memcpy(ctrl + capacity + 1, ctrl, NumClonedBytes());
+  ctrl[capacity] = ctrl_t::kSentinel;
+}
+
+void ClearTombstonesInRangeByRehashing(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  size_t end_offset,
+  void *tmp_space) {
+  void* set = &common;
+  void* slot_array = common.slot_array();
+  const size_t capacity = common.capacity();
+  assert(IsValidCapacity(capacity));
+  assert(!is_small(capacity));
+  // assert start_offset is empty
+  // assert end_offset is empty
+  // Algorithm:
+  // - mark all DELETED slots as EMPTY
+  // - mark all FULL slots as DELETED (There are no full slots at this point, only empties and tombstones. tombstones represent items.)
+  // - for each slot marked as DELETED  (basically for each item)
+  //     hash = Hash(element)
+  //     target = find_first_non_full(hash)
+  //     if target is in the same group
+  //       mark slot as FULL
+  //     else if target is EMPTY (move item back)
+  //       transfer element to target
+  //       mark slot as EMPTY
+  //       mark target as FULL
+  //     else if target is DELETED
+  //       swap current element with target element
+  //       mark target as FULL
+  //       repeat procedure for current slot with moved from element (target)
+  // printf("Rebuilding [%ld %ld]\n", start_offset, end_offset);
+  ctrl_t* ctrl = common.control();
+  const size_t slot_size = policy.slot_size;
+  auto hasher = policy.hash_slot;
+  auto transfer = policy.transfer;
+  bool range_broken = end_offset < start_offset;
+  // printf("Before rebuild\n");
+  // checkAllReachable(common, policy);
+  // checkRangeReachable(common, policy, 0, capacity);
+  // checkRangeReachable(common, policy, start_offset, end_offset);
+  if (end_offset > start_offset) {
+    ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, start_offset, end_offset, capacity);
+  }
+  else {
+    ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, start_offset, capacity, capacity);
+    ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, 0, end_offset, capacity);
+  }
+  // printf("After rebuild\n");
+
+  // Check no full items between start_offset and end_offset.
+  size_t tpos = start_offset;
+  while (tpos != end_offset) {
+    if (tpos != capacity) {
+      assert(ctrl[tpos] == ctrl_t::kEmpty || ctrl[tpos] == ctrl_t::kDeleted);
+    } else {
+      assert(ctrl[tpos] == ctrl_t::kSentinel);
+    }
+    tpos++;
+    tpos = tpos & capacity;
+  }
+
+  size_t pos = start_offset;
+  void* slot_ptr = SlotAddress(slot_array, pos, slot_size);
+  assert(ctrl[end_offset] == ctrl_t::kEmpty);
+  while (true) {
+    if (pos == end_offset) {
+      assert(ctrl[end_offset] == ctrl_t::kEmpty);
+      break;
+    }
+    if (ABSL_PREDICT_FALSE(ctrl[pos] == ctrl_t::kSentinel)) {
+      pos = 0;
+      slot_ptr = SlotAddress(slot_array, pos, slot_size);
+      continue;
+    }
+    assert(slot_ptr == SlotAddress(slot_array, pos, slot_size));
+    if (!IsDeleted(ctrl[pos])) {
+      // printf("%ld empty\n", pos);
+      pos = pos + 1;
+      slot_ptr = NextSlot(slot_ptr, slot_size);
+      continue;
+    }
+    const size_t hash = (*hasher)(set, slot_ptr);
+    const FindInfo target = find_first_non_full(common, hash);
+    const size_t new_i = target.offset;
+    const size_t probe_offset = probe(common, hash).offset();
+    const auto probe_index = [probe_offset, capacity](size_t pos) {
+      return ((pos - probe_offset) & capacity) / Group::kWidth;
+    };
+
+    // Element doesn't move.
+    if (ABSL_PREDICT_TRUE(probe_index(new_i) == probe_index(pos))) {
+      SetCtrl(common, pos, H2(hash), slot_size);
+      pos = pos + 1;
+      slot_ptr = NextSlot(slot_ptr, slot_size);
+      continue;
+    }
+
+    void* new_slot_ptr = SlotAddress(slot_array, new_i, slot_size);
+    if (IsEmpty(ctrl[new_i])) {
+      // Transfer element to the empty spot.
+      // SetCtrl poisons/unpoisons the slots so we have to call it at the
+      // right time.
+      SetCtrl(common, new_i, H2(hash), slot_size);
+      (*transfer)(set, new_slot_ptr, slot_ptr);
+      SetCtrl(common, pos, ctrl_t::kEmpty, slot_size);
+    } else {
+      assert(IsDeleted(ctrl[new_i]));
+      SetCtrl(common, new_i, H2(hash), slot_size);
+      // Until we are done rehashing, DELETED marks previously FULL slots.
+      // But if deleted is out
+      if (!range_broken && (new_i > start_offset && new_i < end_offset)) {
+        // Swap i and new_i elements.
+        (*transfer)(set, tmp_space, new_slot_ptr);
+        (*transfer)(set, new_slot_ptr, slot_ptr);
+        (*transfer)(set, slot_ptr, tmp_space);
+        // repeat the processing of the ith slot
+        --pos;
+        slot_ptr = PrevSlot(slot_ptr, slot_size);
+      } else if (range_broken && (new_i > start_offset || new_i < end_offset)) {
+        // Swap i and new_i elements.
+        (*transfer)(set, tmp_space, new_slot_ptr);
+        (*transfer)(set, new_slot_ptr, slot_ptr);
+        (*transfer)(set, slot_ptr, tmp_space);
+        // repeat the processing of the ith slot
+        --pos;
+        slot_ptr = PrevSlot(slot_ptr, slot_size);
+      } else {
+        (*transfer)(set, new_slot_ptr, slot_ptr);
+        SetCtrl(common, pos, ctrl_t::kEmpty, slot_size);
+      }
+    }
+    pos = pos + 1;
+    slot_ptr = NextSlot(slot_ptr, slot_size);
+  }
+  for (size_t i=0; i < Group::kWidth; i++) {
+    pos = pos + 1;
+    // printf(" Checking extra %ld\n", pos);
+    slot_ptr = NextSlot(slot_ptr, slot_size);
+    if (pos == capacity) {
+      pos = 0;
+      slot_ptr = SlotAddress(slot_array, 0, slot_size);
+    }
+    if (!IsFull(ctrl[pos]))continue;
+
+    const size_t hash = (*hasher)(set, slot_ptr);
+    const size_t probe_offset = probe(common, hash).offset();
+    if (!range_broken && probe_offset > end_offset) continue;
+    if (range_broken && (probe_offset < start_offset && probe_offset > end_offset)) continue;
+
+    // mark as tombstone and reinsert.
+    SetCtrl(common, pos, ctrl_t::kDeleted, slot_size);
+    const FindInfo target = find_first_non_full(common, hash);
+    const size_t new_i = target.offset;
+    const auto probe_index = [probe_offset, capacity](size_t pos) {
+      return ((pos - probe_offset) & capacity) / Group::kWidth;
+    };
+    // If Same Group, don't transfer.
+    if (ABSL_PREDICT_TRUE(probe_index(new_i) == probe_index(pos))) {
+      SetCtrl(common, pos, H2(hash), slot_size);
+      continue;
+    }
+    // Otherwise move to destination.
+    void *new_slot_ptr = SlotAddress(slot_array, new_i, slot_size);
+    (*transfer)(set, new_slot_ptr, slot_ptr);
+    SetCtrl(common, new_i, H2(hash), slot_size);
+  }
+  // TODO: for Group::kWidth items after end, reinsert if homeslot is between
+  // start and end offset.
+  // checkRangeReachable(common, policy, start_offset, end_offset);
+  // checkRangeReachable(common, policy, 0, capacity);
+  // printf("After rebuilding\n");
+  // checkAllReachable(common, policy);
 }
 
 void ClearTombstonesInRange(
@@ -200,7 +447,7 @@ void ClearTombstonesInRange(
   // TODO: For now we clear all tombstones, just to check for correctness.
   // Leaving in a lot of comments to help with debugging.
   // size_t outerProbeLength = 0;
-  // size_t innerProbeLength = 0;
+  // size_t innerP obeLength = 0;
   void* set = &common;
   ctrl_t* ctrl = common.control();
   void* slot_array = common.slot_array();
@@ -331,7 +578,7 @@ void ClearTombstonesInRange(
   // checkAllReachable(common, policy);
 }
 
-void DropDeletesWithoutResizeByClearingTombstones(
+void DropDeletesWithoutResizeByPushingTombstones(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset) {
@@ -372,6 +619,58 @@ void DropDeletesWithoutResizeByClearingTombstones(
     // We've completed the full scan.
     if (range_start == start_offset) break;
   }
+  ResetGrowthLeft(common);
+}
+
+void DropDeletesWithoutResizeByRehashingRange(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  void *tmp_space) {
+
+  size_t scan_length = 0;
+  const size_t capacity = common.capacity();
+  ctrl_t* ctrl = common.control();
+  // Find the first slot after seq that has an empty.
+  size_t range_start = start_offset;
+  size_t range_end = start_offset;
+  probe_seq<Group::kWidth> seq(start_offset, capacity);
+  while (true) {
+    GroupEmptyOrDeleted g{ctrl + seq.offset()};
+    auto mask = g.MaskEmpty();
+    if (mask) {
+      range_start = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
+      break;
+    }
+    seq.next();
+    assert(seq.index() != start_offset && "full table!");
+  }
+  start_offset = range_start;
+
+  while (scan_length < capacity) {
+    // Find the next empty group.
+    seq.next();
+    while (true) {
+      GroupEmptyOrDeleted g{ctrl + seq.offset()};
+      auto mask = g.MaskEmpty();
+      if (mask) {
+        range_end = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
+        break;
+      }
+      seq.next();
+      scan_length += Group::kWidth;
+      assert(seq.index() != start_offset && "full table!");
+    }
+    if (range_start == range_end) {
+      abort();
+    }
+    printf("Clearing: [%ld %ld] tc: %ld size: %ld\n", range_start, range_end, common.TombstonesCount(), common.capacity());
+    ClearTombstonesInRangeByRehashing(common, policy, range_start, range_end, tmp_space);
+    range_start = range_end;
+    // We've completed the full scan.
+    if (range_start == start_offset) break;
+  }
+  // printf("item at 589: %ld\n", *(size_t *)(SlotAddress(common.slot_array(), 589, policy.slot_size)));
   ResetGrowthLeft(common);
 }
 

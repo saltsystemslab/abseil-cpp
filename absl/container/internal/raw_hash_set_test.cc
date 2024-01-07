@@ -1119,26 +1119,19 @@ TEST(Table, ChurnTestSmall) {
     }
 
     for(uint64_t i =0; i<(hashTableCap * 2)/100; i++) {
-      arr[(arr_index+i) % hashTableSize]; 
+      arr[(arr_index+i) % hashTableSize] = rand(); 
       //fprintf(fp, "%d %ld\n", INS, arr[(arr_index+i)]);
       t.insert(arr[(arr_index+i) % hashTableSize]);
       s.insert(arr[(arr_index+i) % hashTableSize]);
       // printf("INSERTING: %d\n", arr[(arr_index+i)%hashTableSize]);
     }
 
-    // Broken for zombie_graveyard
-    for (int i=0; i<1000; i++) {
-      if (s.find(i) == s.end() && t.find(i) != t.end()) {
-        printf("Item: %d not supposed to be present.\n", i);
-        return;
-      }
-      else if (s.find(i) != s.end() && t.find(i) == t.end()) {
-        t.find(i);
-        printf("Item: %d supposed to be present.\n", i);
-        return;
-      }
+    for (auto item : s) {
+      assert(t.find(item) != t.end());
     }
-
+    for (auto item : t) {
+      assert(s.find(item) != s.end());
+    }
     // printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
     arr_index += (hashTableCap*2)/100;
   }

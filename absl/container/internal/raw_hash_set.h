@@ -1846,10 +1846,16 @@ void DropDeletesWithoutResize(CommonFields& common,
 void RedistributeTombstones(CommonFields& common,
                               const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
 
-void DropDeletesWithoutResizeByClearingTombstones(
+void DropDeletesWithoutResizeByPushingTombstones(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset);
+void DropDeletesWithoutResizeByRehashingRange(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset, void *tmp_space);
+
+void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity);
 
 // A SwissTable.
 //
@@ -2990,12 +2996,13 @@ class raw_hash_set {
 
   inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
     // Stack-allocate space for swapping elements.
-    #ifdef ABSL_ZOMBIE_GR_REBUILD_2_ROUND
+    #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
-    DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
-    RedistributeTombstones(common(), GetPolicyFunctions(), tombstone_distance, tmp);
-    #elif ABSL_ZOMBIE_GR_REBUILD_1_ROUND
-    DropDeletesWithoutResizeByClearingTombstones(common(), GetPolicyFunctions(), 0);
+    DropDeletesWithoutResizeByRehashingRange(common(), GetPolicyFunctions(), 0, tmp);
+    #elif ABSL_ZOMBIE_GR_REBUILD_PUSH_TOMBSTONES
+    DropDeletesWithoutResizeByPushingTombstones(common(), GetPolicyFunctions(), 0);
+    #else
+    abort();
     #endif
     get_size();
   }
