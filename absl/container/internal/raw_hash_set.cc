@@ -614,6 +614,7 @@ void DropDeletesWithoutResizeByPushingTombstones(
       seq.next();
       assert(seq.index() != start_offset && "full table!");
     }
+    // printf("Clearing by pushing %ld %ld\n", range_start, range_end);
     ClearTombstonesInRange(common, policy, range_start, range_end);
     range_start = range_end;
     // We've completed the full scan.
@@ -664,7 +665,7 @@ void DropDeletesWithoutResizeByRehashingRange(
     if (range_start == range_end) {
       abort();
     }
-    printf("Clearing: [%ld %ld] tc: %ld size: %ld\n", range_start, range_end, common.TombstonesCount(), common.capacity());
+    // printf("Clearing: [%ld %ld] tc: %ld size: %ld\n", range_start, range_end, common.TombstonesCount(), common.capacity());
     ClearTombstonesInRangeByRehashing(common, policy, range_start, range_end, tmp_space);
     range_start = range_end;
     // We've completed the full scan.
