@@ -1137,6 +1137,35 @@ class CommonFields : public CommonFieldsGenerationInfo {
         std::count(control(), control() + capacity(), ctrl_t::kDeleted));
   }
 
+  bool should_rebuild() {
+    if (target_rebuild_num_full_scans > current_rebuild_num_full_scans) {
+      return true;
+    }
+    else if (target_rebuild_num_full_scans > current_rebuild_num_full_scans) {
+      return false;
+    }
+    return current_rebuild_pos_ < target_rebuild_pos_;
+  }
+
+  size_t get_load_factor_x() {
+    return capacity()/(capacity()-size());
+  }
+
+  size_t get_current_rebuild_pos() {
+    return current_rebuild_pos_;
+  }
+
+  void set_current_rebuild_pos(size_t pos) {
+    if (pos < current_rebuild_pos_) {
+      current_rebuild_num_full_scans++;
+    }
+    current_rebuild_pos_ = pos;
+  }
+  void advance_target_rebuild_pos() {
+    target_rebuild_pos_ += (rebuild_window_multiplier) * get_load_factor_x();
+    if (target_rebuild_pos_ > capacity()) target_rebuild_num_full_scans++;
+    target_rebuild_pos_ = target_rebuild_pos_ & capacity();
+  }
  private:
   // We store the has_infoz bit in the lowest bit of size_.
   static constexpr size_t HasInfozShift() { return 1; }
@@ -1170,6 +1199,27 @@ class CommonFields : public CommonFieldsGenerationInfo {
 
   // The size and also has one bit that stores whether we have infoz.
   size_t size_ = 0;
+
+  // const size_t target_rebuild_interval_size = 4*x;
+  // size_t rebuild_window = capacity/(4*x); // Graveyard rebuild window (small, and there is room to improve it, we use bigger value in Zombie, e.g. n/x).
+  // float x = 1 / (1 - size / capacity);
+  // size_t rebuilt_cluster_size;
+  // CountDown to start next rebuild window
+  // Scale by cluster size.
+  // size_t cur_rebuild_cd = rebuilt_cluster_size / target_rebuild_interval_size; 
+  // Scale rebuild_cd 
+  // Parameters
+  // size_t rebuild_cd = capacity/(4*x); 
+  // size_t tombstone_distance = 2*x; // cb*x, there will be n/(2*x) primitive tombstones
+  // Position to start rebuild window from.
+  #ifndef WINDOW_FACTOR
+  #define WINDOW_FACTOR 1
+  #endif
+  size_t rebuild_window_multiplier = WINDOW_FACTOR; // If I make this const, build fails.
+  size_t target_rebuild_num_full_scans = 0;
+  size_t target_rebuild_pos_ = 0;
+  size_t current_rebuild_num_full_scans = 0;
+  size_t current_rebuild_pos_ = 0;
 };
 
 template <class Policy, class Hash, class Eq, class Alloc>
@@ -1854,6 +1904,14 @@ void DropDeletesWithoutResizeByRehashingRange(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset, void *tmp_space);
+
+void ClearTombstonesInRangeByRehashing(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  size_t start_offset,
+  size_t end_offset,
+  void *tmp_space);
+
 
 void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity);
 
@@ -2985,7 +3043,6 @@ class raw_hash_set {
   }
 
   // Prunes control bytes to remove as many tombstones as possible.
-  //
   // See the comment on `rehash_and_grow_if_necessary()`.
   inline void drop_deletes_without_resize() {
     // Stack-allocate space for swapping elements.
@@ -3059,7 +3116,9 @@ private:
       //  762 | 149836       0.37        13 | 148559       0.74       190
       //  807 | 149736       0.39        14 | 151107       0.39        14
       //  852 | 150204       0.42        15 | 151019       0.42        15
+      printf("Before DROPs: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       drop_deletes_without_resize();
+      printf("After DROPs: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     } else {
       // Otherwise grow the container.
       #ifndef ABSL_ZOMBIE 
@@ -3151,6 +3210,7 @@ private:
     auto hash = hash_ref()(key);
     auto seq = probe(common(), hash);
     const ctrl_t* ctrl = control();
+    // First find key, if exists insert there.
     while (true) {
       Group g{ctrl + seq.offset()};
       for (uint32_t i : g.Match(H2(hash))) {
@@ -3163,7 +3223,51 @@ private:
       seq.next();
       assert(seq.index() <= capacity() && "full table!");
     }
+    // if key not found
     return {prepare_insert(hash), true};
+  }
+
+  void clear_tombstones_from_rebuild_pos() {
+    // Implement this.
+    // printf("size: %ld tc: %ld\n", common().size(), common().TombstonesCount());
+    size_t rebuild_pos = common().get_current_rebuild_pos();
+    size_t capacity = common().capacity();
+    ctrl_t* ctrl = common().control();
+    size_t range_start, range_end;
+    probe_seq<Group::kWidth> seq(rebuild_pos, capacity);
+    // First empty after rebuild_pos
+    while (true) {
+      GroupEmptyOrDeleted g{ctrl + seq.offset()};
+      auto mask = g.MaskEmpty();
+      if (mask) {
+        range_start = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
+        break;
+      }
+      seq.next();
+      // assert(seq.index() != rebuild_pos && "full table!");
+    }
+    range_start = range_start & capacity;
+    seq.next();
+    // Next empty after rebuild_pos
+    while (true) {
+      GroupEmptyOrDeleted g{ctrl + seq.offset()};
+      auto mask = g.MaskEmpty();
+      if (mask) {
+        range_end = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
+        break;
+      }
+      seq.next();
+      // assert(seq.index() != rebuild_pos && "full table!");
+    }
+    range_end = range_end & capacity;
+    // printf("rebuilding %ld %ld size: %ld tc: %ld\n", range_start, range_end, common().size(), common().TombstonesCount());
+    #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
+    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
+    ClearTombstonesInRangeByRehashing(common(), GetPolicyFunctions(), range_start, range_end, tmp);
+    common().set_current_rebuild_pos(range_end);
+    #else
+    abort();
+    #endif
   }
 
   // Given the hash of a value not currently in the table, finds the next
@@ -3178,6 +3282,13 @@ private:
       const size_t cap = capacity();
       resize(growth_left() > 0 ? cap : NextCapacity(cap));
     }
+    #ifdef ABSL_ZOMBIE_DEAMORTIZED
+    if (common().should_rebuild()) {
+      clear_tombstones_from_rebuild_pos();
+    }
+    common().advance_target_rebuild_pos();
+    auto target = find_first_non_full(common(), hash);
+    #else
     auto target = find_first_non_full(common(), hash);
     // Resize if growth left == 0 and we are consuming a new slot.
     if (!rehash_for_bug_detection &&
@@ -3195,6 +3306,7 @@ private:
       target = HashSetResizeHelper::FindFirstNonFullAfterResize(
           common(), old_capacity, hash);
     }
+    #endif
     common().increment_size();
     set_growth_left(growth_left() - IsEmpty(control()[target.offset]));
     SetCtrl(common(), target.offset, H2(hash), sizeof(slot_type));

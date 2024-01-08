@@ -636,6 +636,7 @@ void DropDeletesWithoutResizeByRehashingRange(
   size_t range_start = start_offset;
   size_t range_end = start_offset;
   probe_seq<Group::kWidth> seq(start_offset, capacity);
+  // Find an empty.
   while (true) {
     GroupEmptyOrDeleted g{ctrl + seq.offset()};
     auto mask = g.MaskEmpty();
@@ -648,6 +649,7 @@ void DropDeletesWithoutResizeByRehashingRange(
   }
   start_offset = range_start;
 
+  // Keep finding the next empty.
   while (scan_length < capacity) {
     // Find the next empty group.
     seq.next();
