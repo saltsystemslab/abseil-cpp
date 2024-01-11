@@ -1895,6 +1895,12 @@ void DropDeletesWithoutResize(CommonFields& common,
                               const PolicyFunctions& policy, void* tmp_space);
 void RedistributeTombstones(CommonFields& common,
                               const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
+void RedistributeTombstonesInRange(
+  CommonFields& common,
+  const PolicyFunctions& policy,
+  size_t start_offset,
+  size_t end_offset,
+  size_t tombstone_distance);
 
 void DropDeletesWithoutResizeByPushingTombstones(
   CommonFields& common,
@@ -3227,9 +3233,7 @@ private:
     return {prepare_insert(hash), true};
   }
 
-  void clear_tombstones_from_rebuild_pos() {
-    // Implement this.
-    // printf("size: %ld tc: %ld\n", common().size(), common().TombstonesCount());
+  void clear_and_redistribute_tombstones_from_rebuild_pos() {
     size_t rebuild_pos = common().get_current_rebuild_pos();
     size_t capacity = common().capacity();
     ctrl_t* ctrl = common().control();
@@ -3264,6 +3268,7 @@ private:
     #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     ClearTombstonesInRangeByRehashing(common(), GetPolicyFunctions(), range_start, range_end, tmp);
+    // RedistributeTombstonesInRange(common(), GetPolicyFunctions(), range_start, range_end, 16 * common().capacity()/(common().get_load_factor_x()));
     common().set_current_rebuild_pos(range_end);
     #else
     abort();
@@ -3284,7 +3289,7 @@ private:
     }
     #ifdef ABSL_ZOMBIE_DEAMORTIZED
     if (common().should_rebuild()) {
-      clear_tombstones_from_rebuild_pos();
+      clear_and_redistribute_tombstones_from_rebuild_pos();
     }
     common().advance_target_rebuild_pos();
     auto target = find_first_non_full(common(), hash);

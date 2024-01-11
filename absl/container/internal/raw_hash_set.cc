@@ -677,6 +677,73 @@ void DropDeletesWithoutResizeByRehashingRange(
   ResetGrowthLeft(common);
 }
 
+bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size_t position) {
+  if (wrapped_around) {
+    assert(end_offset <= start_offset);
+    return (position > start_offset || position < end_offset);
+  } else {
+    assert(end_offset >= start_offset);
+    return (position > start_offset && position < end_offset);
+  }
+}
+
+void RedistributeTombstonesInRange(
+  CommonFields& common,
+  const PolicyFunctions& policy,
+  size_t start_offset,
+  size_t end_offset,
+  size_t tombstone_distance) {
+    printf("%ld %ld %ld\n", start_offset, end_offset, tombstone_distance);
+  void* set = &common;
+  void* slot_array = common.slot_array();
+  const size_t capacity = common.capacity();
+  ctrl_t* ctrl = common.control();
+  auto hasher = policy.hash_slot;
+  auto transfer = policy.transfer;
+  const size_t slot_size = policy.slot_size;
+  bool wrapped_around = end_offset < start_offset;
+
+  size_t primitive_tombstone_slot = (start_offset + tombstone_distance) & capacity;
+  void* primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+  bool slot_passed_tombstone = false;
+
+  size_t slot_offset = start_offset;
+  void* slot_ptr = SlotAddress(slot_array, start_offset, slot_size);
+  while (IsInRange(start_offset, end_offset, wrapped_around, slot_offset)) {
+    slot_offset++;
+    slot_ptr = NextSlot(slot_ptr, slot_size);
+    if (slot_offset==0 || ctrl[slot_offset] == ctrl_t::kSentinel) {
+      slot_offset = 0;
+      slot_ptr = SlotAddress(slot_array, 0, slot_size);
+    }
+
+    if (slot_offset == primitive_tombstone_slot) {
+      slot_passed_tombstone = true;
+      if (ctrl[slot_offset] == ctrl_t::kEmpty) {
+        primitive_tombstone_slot += tombstone_distance;
+        primitive_tombstone_slot &= capacity;
+        primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+        slot_passed_tombstone  = false;
+      }
+      continue;
+    }
+    assert(!IsDeleted(ctrl[slot_offset])); 
+    if (IsFull(ctrl[slot_offset]) || !slot_passed_tombstone)continue;
+
+    assert(IsEmpty(ctrl[slot_offset])); 
+    const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
+    SetCtrl(common, primitive_tombstone_slot, ctrl_t::kDeleted, slot_size);
+    (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
+    SetCtrl(common, slot_offset, H2(hash), slot_size);
+
+    primitive_tombstone_slot += tombstone_distance;
+    primitive_tombstone_slot &= capacity;
+    primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+    slot_passed_tombstone  = false;
+  }
+
+}
+
 
 // Should be called right after DropDeletesWithoutResize.
 // Scans the entire hash table and places a tombstone (deleted marker) every tombstone_distance spot.
