@@ -1092,6 +1092,7 @@ TEST(Table, ChurnTestSmall) {
   size_t seed = time(NULL);
   // size_t seed = 1704220960;
   // size_t seed = 1704222519;
+  seed = 1704963845;
   srand(seed);
   printf("SEED: %ld\n", seed);
   IntTable t;
@@ -1108,7 +1109,7 @@ TEST(Table, ChurnTestSmall) {
 
   int arr_index = 0;
   for(int churn_round=0; churn_round < 6000; churn_round++) {
-    printf("cycle: %ld %ld items\n", churn_round, s.size());
+    // printf("cycle: %ld %ld items\n", churn_round, s.size());
     for(uint64_t i =0; i<(hashTableCap * 2)/100; i++) {
       //fprintf(fp, "%d %ld\n", DEL, arr[(arr_index+i)]);
       t.erase(arr[(arr_index+i) % hashTableSize]);

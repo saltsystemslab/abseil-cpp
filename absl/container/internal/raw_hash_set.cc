@@ -310,19 +310,6 @@ void ClearTombstonesInRangeByRehashing(
     ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, start_offset, capacity, capacity);
     ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, 0, end_offset, capacity);
   }
-  // printf("After rebuild\n");
-
-  // Check no full items between start_offset and end_offset.
-  size_t tpos = start_offset;
-  while (tpos != end_offset) {
-    if (tpos != capacity) {
-      assert(ctrl[tpos] == ctrl_t::kEmpty || ctrl[tpos] == ctrl_t::kDeleted);
-    } else {
-      assert(ctrl[tpos] == ctrl_t::kSentinel);
-    }
-    tpos++;
-    tpos = tpos & capacity;
-  }
 
   size_t pos = start_offset;
   void* slot_ptr = SlotAddress(slot_array, pos, slot_size);
@@ -691,13 +678,19 @@ bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size
   }
 }
 
+bool IsAhead(size_t start_offset, size_t capacity, size_t pos1, size_t pos2) {
+  // Get Distance from start_offset
+  size_t dist1 = (pos1 - start_offset) & capacity;
+  size_t dist2 = (pos2 - start_offset) & capacity;
+  return dist2 > dist1;
+}
+
 void RedistributeTombstonesInRange(
   CommonFields& common,
   const PolicyFunctions& policy,
   size_t start_offset,
   size_t end_offset,
   size_t tombstone_distance) {
-    printf("%ld %ld %ld\n", start_offset, end_offset, tombstone_distance);
   void* set = &common;
   void* slot_array = common.slot_array();
   const size_t capacity = common.capacity();
@@ -713,13 +706,14 @@ void RedistributeTombstonesInRange(
 
   size_t slot_offset = start_offset;
   void* slot_ptr = SlotAddress(slot_array, start_offset, slot_size);
-  while (IsInRange(start_offset, end_offset, wrapped_around, slot_offset)) {
+  while (true) {
     slot_offset++;
     slot_ptr = NextSlot(slot_ptr, slot_size);
     if (slot_offset==0 || ctrl[slot_offset] == ctrl_t::kSentinel) {
       slot_offset = 0;
       slot_ptr = SlotAddress(slot_array, 0, slot_size);
     }
+    if (slot_offset == end_offset) break;
 
     if (slot_offset == primitive_tombstone_slot) {
       slot_passed_tombstone = true;
@@ -727,13 +721,25 @@ void RedistributeTombstonesInRange(
         primitive_tombstone_slot += tombstone_distance;
         primitive_tombstone_slot &= capacity;
         primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
-        slot_passed_tombstone  = false;
+        slot_passed_tombstone  = IsAhead(start_offset, capacity, primitive_tombstone_slot, slot_offset);
       }
       continue;
     }
     assert(!IsDeleted(ctrl[slot_offset])); 
+    if (IsFull(ctrl[slot_offset]))continue;
+    assert(IsEmpty(ctrl[slot_offset]));
+
+    if (!slot_passed_tombstone) {
+      primitive_tombstone_slot = slot_offset + tombstone_distance;
+      primitive_tombstone_slot &= capacity;
+      primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+      slot_passed_tombstone  = false;
+      continue;
+    }
     if (IsFull(ctrl[slot_offset]) || !slot_passed_tombstone)continue;
 
+    // checkAllReachable(common, policy);
+    // printf("Found an empty!: %ld %ld %ld\n", start_offset, end_offset, tombstone_distance);
     assert(IsEmpty(ctrl[slot_offset])); 
     const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
     SetCtrl(common, primitive_tombstone_slot, ctrl_t::kDeleted, slot_size);
@@ -743,9 +749,9 @@ void RedistributeTombstonesInRange(
     primitive_tombstone_slot += tombstone_distance;
     primitive_tombstone_slot &= capacity;
     primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
-    slot_passed_tombstone  = false;
+    slot_passed_tombstone  = IsAhead(start_offset, capacity, primitive_tombstone_slot, slot_offset);
+    // checkAllReachable(common, policy);
   }
-
 }
 
 
