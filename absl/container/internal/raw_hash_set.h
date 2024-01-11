@@ -1141,7 +1141,7 @@ class CommonFields : public CommonFieldsGenerationInfo {
     if (target_rebuild_num_full_scans > current_rebuild_num_full_scans) {
       return true;
     }
-    else if (target_rebuild_num_full_scans > current_rebuild_num_full_scans) {
+    else if (target_rebuild_num_full_scans < current_rebuild_num_full_scans) {
       return false;
     }
     return current_rebuild_pos_ < target_rebuild_pos_;

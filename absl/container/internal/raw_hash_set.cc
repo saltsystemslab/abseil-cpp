@@ -266,6 +266,10 @@ void ClearTombstonesInRangeByRehashing(
   size_t start_offset,
   size_t end_offset,
   void *tmp_space) {
+
+  if (start_offset == end_offset) {
+    abort();
+  }
   void* set = &common;
   void* slot_array = common.slot_array();
   const size_t capacity = common.capacity();
