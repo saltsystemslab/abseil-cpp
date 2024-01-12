@@ -5,6 +5,24 @@ WARNING: If using ABSL_ZOMBIE option, you need to reserve space to use the hashm
 h.reserve(1196)
 ```
 
+## Important Files and Functions
+
+The relevant files needed are
+
+* absl/container/internal/raw_hash_set.h
+* absl/container/internal/raw_hash_set.cc
+* absl/container/internal/raw_hash_set_test.cc
+
+The important functions here are
+
+```C++
+absl_raw_hash_set.h::
+absl_raw_hash_set.h::find_or_prepare_insert
+absl_raw_hash_set.h::prepare_insert
+absl_raw_hash_set.h::rehash_and_grow_if_necessary
+```
+
+
 ## List of Preprocessor Flags
 
 Load Factor = items / capacity
@@ -49,12 +67,6 @@ True Load Factor = (items + tombstones)/capacity
 	2. Rebuilds in a deamortized fashion, while also inserting tombstones
 	3. Inserts tombstones every 4.x, (x=1/(1-load factor)) distance.
 
-## Important Functions
-```C++
-absl_raw_hash_set.h::find_or_prepare_insert
-absl_raw_hash_set.h::prepare_insert
-absl_raw_hash_set.h::rehash_and_grow_if_necessary
-```
 
 ### Running Correctness Tests
 
