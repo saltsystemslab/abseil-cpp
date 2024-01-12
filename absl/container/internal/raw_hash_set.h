@@ -1905,12 +1905,14 @@ void DropDeletesWithoutResizeByRehashingClusters(
   CommonFields& common,
   const PolicyFunctions& policy, void *tmp_space);
 
-void ClearTombstonesInRangeByRehashing(
+void ClearTombstonesInRangeByRehashingCluster(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset,
   size_t end_offset,
   void *tmp_space);
+
+size_t FindNextEmptySlot(ctrl_t * ctrl, size_t start_slot, size_t capacity, size_t *probe_length);
 
 
 void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity);
@@ -3213,38 +3215,17 @@ class raw_hash_set {
   void clear_and_redistribute_tombstones_from_rebuild_pos() {
     size_t rebuild_pos = common().get_current_rebuild_pos();
     size_t capacity = common().capacity();
-    ctrl_t* ctrl = common().control();
-    size_t range_start, range_end;
+    size_t range_start = 0, range_end = 0;
     probe_seq<Group::kWidth> seq(rebuild_pos, capacity);
-    // First empty after rebuild_pos
-    while (true) {
-      GroupEmptyOrDeleted g{ctrl + seq.offset()};
-      auto mask = g.MaskEmpty();
-      if (mask) {
-        range_start = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
-        break;
-      }
-      seq.next();
-      // assert(seq.index() != rebuild_pos && "full table!");
-    }
+    size_t probe_length = 0;
+    range_start = FindNextEmptySlot(common().control(), rebuild_pos, common().capacity(), &probe_length);
     range_start = range_start & capacity;
-    seq.next();
-    // Next empty after rebuild_pos
-    while (true) {
-      GroupEmptyOrDeleted g{ctrl + seq.offset()};
-      auto mask = g.MaskEmpty();
-      if (mask) {
-        range_end = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
-        break;
-      }
-      seq.next();
-      // assert(seq.index() != rebuild_pos && "full table!");
-    }
+    range_end = FindNextEmptySlot(common().control(), range_start+1, common().capacity(), &probe_length);
     range_end = range_end & capacity;
     // printf("rebuilding %ld %ld size: %ld tc: %ld\n", range_start, range_end, common().size(), common().TombstonesCount());
     #ifdef ABSL_ZOMBIE_REBUILD_REHASH_CLUSTER
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
-    ClearTombstonesInRangeByRehashing(common(), GetPolicyFunctions(), range_start, range_end, tmp);
+    ClearTombstonesInRangeByRehashingCluster(common(), GetPolicyFunctions(), range_start, range_end, tmp);
     #ifdef ABSL_ZOMBIE_REDISTRIBUTE_TOMBSTONES
     RedistributeTombstonesInRange(common(), GetPolicyFunctions(), range_start, range_end, 2 * common().capacity()/(common().get_load_factor_x()));
     #endif

@@ -1070,8 +1070,8 @@ struct Modulo1000HashTable
 };
 
 TEST(Table, ChurnTestSmall) {
-  int hashTableCap = (1<<10)-1;
-  int hashTableSize = (hashTableCap*95)/100;
+  const size_t hashTableCap = (1<<10)-1;
+  const size_t hashTableSize = (hashTableCap*95)/100;
 
   size_t seed = time(NULL);
   printf("SEED: %ld\n", seed);
@@ -1138,7 +1138,7 @@ TEST(Table, ChurnTest) {
       arr[(arr_index+i) % hashTableSize] = random(); 
       t.insert(arr[(arr_index+i) % hashTableSize]);
     }
-    printf("%d %d %d %d\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
+    printf("%lu %lu %lu %lu\n", t.capacity(), t.size(), RawHashSetTestOnlyAccess::CountTombstones(t), t.growth_left());
     arr_index += (hashTableCap*1)/100;
   }
 }

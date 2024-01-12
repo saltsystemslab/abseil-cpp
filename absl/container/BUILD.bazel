@@ -706,7 +706,7 @@ cc_library(
     hdrs = ["internal/raw_hash_set.h"],
     # ADD ZOMBIE VARIANT PREPROCESSOR FLAGS HERE. 
     # SEE README.MD for list of symbols for each variant.
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER"],
+    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER -DABSL_ZOMBIE_DEAMORTIZED"],
     linkopts = ABSL_DEFAULT_LINKOPTS,
     deps = [
         ":common",
@@ -735,7 +735,7 @@ cc_test(
     srcs = ["internal/raw_hash_set_test.cc"],
     # ADD ZOMBIE VARIANT PREPROCESSOR FLAGS HERE. 
     # SEE README.MD for list of symbols for each variant.
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER"],
+    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER -DABSL_ZOMBIE_DEAMORTIZED"],
     linkstatic = 1,
     tags = NOTEST_TAGS_MOBILE + [
         "no_test_loonix",

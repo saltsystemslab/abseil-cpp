@@ -141,7 +141,12 @@ static inline void* PrevSlot(void* slot, size_t slot_size) {
   return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(slot) - slot_size);
 }
 
-bool find_key(
+// Checks if key can be reached and is in hash map.
+// This exists because the hash_set key find requires the hash_set class object,
+// while methods in this file are static methods outside of a class.
+// This is only used for checking correctness.
+// If hash table is full, will loop forever.
+bool FindKey(
   CommonFields& common,
   const PolicyFunctions& policy, 
   const size_t key,
@@ -151,7 +156,6 @@ bool find_key(
   ctrl_t* ctrl = common.control();
   void* slot_array = common.slot_array();
   const size_t slot_size = policy.slot_size;
-
   while (true) {
     Group g{ctrl + seq.offset()};
     for (uint32_t i : g.Match(H2(hash))) {
@@ -164,7 +168,10 @@ bool find_key(
   return false;
 }
 
-bool checkAllReachable(
+// Checks if all full slots in a hash table can be probed and reached.
+// This is only used for checking correctness.
+// If hash table is full, will loop forever.
+bool CheckAllReachable(
   CommonFields& common,
   const PolicyFunctions& policy) {
   void* set = &common;
@@ -181,8 +188,8 @@ bool checkAllReachable(
     }
     item_count++;
     void* target_ptr = SlotAddress(slot_array, i, slot_size);
-    if(!(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
-      printf("Failed in checkAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
+    if(!(FindKey(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
+      printf("Failed in CheckAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
       assert(false);
     }
   }
@@ -192,7 +199,9 @@ bool checkAllReachable(
   return true;
 }
 
-bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size_t position) {
+// Checks if position is in the range [start_offset, end_offset]
+// If start_offset wraps around, i.e start_offset > end_offset, then wrapped_around should be true.
+inline bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size_t position) {
   if (wrapped_around) {
     assert(end_offset <= start_offset);
     return (position > start_offset || position < end_offset);
@@ -202,8 +211,17 @@ bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size
   }
 }
 
+// Returns true if pos2 is ahead of pos1 in a sequence that starts from start_offset. 
+bool IsAhead(size_t start_offset, size_t capacity, size_t pos1, size_t pos2) {
+  // Get Distance from start_offset
+  size_t dist1 = (pos1 - start_offset) & capacity;
+  size_t dist2 = (pos2 - start_offset) & capacity;
+  return dist2 > dist1;
+}
 
-bool checkRangeReachable(
+
+// Same as CheckAllReachable, but only for a range.
+bool CheckRangeReachable(
   CommonFields& common,
   const PolicyFunctions& policy,
   size_t start_offset,
@@ -234,8 +252,8 @@ bool checkRangeReachable(
       continue;
     }
     void* target_ptr = SlotAddress(slot_array, i, slot_size);
-    if(!(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
-      printf("Failed in checkAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
+    if(!(FindKey(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true)) {
+      printf("Failed in CheckAllReachable! %ld (homeslot: )%ld\n", i, probe(common, (*hasher)(set, target_ptr)).offset());
       assert(false);
     }
   }
@@ -243,6 +261,10 @@ bool checkRangeReachable(
   return true;
 }
 
+// Converts all metadata between [start_offset, end_offset]. 
+// Here start_offset and end_offset are slots.
+// They do not have to be group aligned (end_offset - start_offset) % 16 can be non-zero.
+// But end_offset must be greater than start_offset (does not handle wrap around).
 void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_offset, size_t end_offset, size_t capacity) {
   assert(ctrl[capacity] == ctrl_t::kSentinel);
   assert(IsValidCapacity(capacity));
@@ -271,6 +293,7 @@ void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_off
   ctrl[capacity] = ctrl_t::kSentinel;
 }
 
+// Probing from start_slot, find the next empty slot.
 size_t FindNextEmptySlot(ctrl_t * ctrl, size_t start_slot, size_t capacity, size_t *probe_length) {
   probe_seq<Group::kWidth> seq(start_slot, capacity);
   // Find an empty.
@@ -288,6 +311,11 @@ size_t FindNextEmptySlot(ctrl_t * ctrl, size_t start_slot, size_t capacity, size
   return 0;
 }
 
+// Rehashes a cluster, similar to the algorithm in DropDeletesWithoutResize, but for a cluster.
+// Handles edge cases of items that leak beyond a cluster (Group::kWidth worth items after end_offset).
+// Assumes no tombstones or empties between [start_offset, end_offset]
+// Assumes ctrl[start_offset] and ctrl[end_offset] are empty.
+// Refer to comment at DropDeletesWithoutResize for algorithm.
 void ClearTombstonesInRangeByRehashingCluster(
   CommonFields& common,
   const PolicyFunctions& policy, 
@@ -296,6 +324,7 @@ void ClearTombstonesInRangeByRehashingCluster(
   void *tmp_space) {
 
   if (start_offset == end_offset) {
+    // TODO: call DropDeletesWithoutResize()
     abort();
   }
   void* set = &common;
@@ -303,34 +332,11 @@ void ClearTombstonesInRangeByRehashingCluster(
   const size_t capacity = common.capacity();
   assert(IsValidCapacity(capacity));
   assert(!is_small(capacity));
-  // assert start_offset is empty
-  // assert end_offset is empty
-  // Algorithm:
-  // - mark all DELETED slots as EMPTY
-  // - mark all FULL slots as DELETED (There are no full slots at this point, only empties and tombstones. tombstones represent items.)
-  // - for each slot marked as DELETED  (basically for each item)
-  //     hash = Hash(element)
-  //     target = find_first_non_full(hash)
-  //     if target is in the same group
-  //       mark slot as FULL
-  //     else if target is EMPTY (move item back)
-  //       transfer element to target
-  //       mark slot as EMPTY
-  //       mark target as FULL
-  //     else if target is DELETED
-  //       swap current element with target element
-  //       mark target as FULL
-  //       repeat procedure for current slot with moved from element (target)
-  // printf("Rebuilding [%ld %ld]\n", start_offset, end_offset);
   ctrl_t* ctrl = common.control();
   const size_t slot_size = policy.slot_size;
   auto hasher = policy.hash_slot;
   auto transfer = policy.transfer;
   bool cluster_wraps_around = end_offset < start_offset;
-  // printf("Before rebuild\n");
-  // checkAllReachable(common, policy);
-  // checkRangeReachable(common, policy, 0, capacity);
-  // checkRangeReachable(common, policy, start_offset, end_offset);
   if (end_offset > start_offset) {
     ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl, start_offset, end_offset, capacity);
   }
@@ -354,11 +360,16 @@ void ClearTombstonesInRangeByRehashingCluster(
       continue;
     }
     assert(slot_ptr == SlotAddress(slot_array, pos, slot_size));
-    if (!IsDeleted(ctrl[pos])) {
+
+    if (IsEmpty(ctrl[pos])) {
       pos = pos + 1;
       slot_ptr = NextSlot(slot_ptr, slot_size);
       continue;
     }
+
+    // The slot now points to a item that needs to be rehashed.
+    // This slot's metadata was converted to a deleted above.
+    assert(ctrl[pos] == ctrl_t::kDeleted);
     const size_t hash = (*hasher)(set, slot_ptr);
     const FindInfo target = find_first_non_full(common, hash);
     const size_t new_i = target.offset;
@@ -421,7 +432,13 @@ void ClearTombstonesInRangeByRehashingCluster(
 
     const size_t hash = (*hasher)(set, slot_ptr);
     const size_t probe_offset = probe(common, hash).offset();
-    if (!IsInRange(start_offset, end_offset, cluster_wraps_around, probe_offset)) continue;
+    if (!IsInRange(start_offset, end_offset, cluster_wraps_around, probe_offset)) {
+      // Do not reinsert if item's home cluster was outside this cluster.
+      // This item's homeslot is after the end_offset.
+      // There is no harm in reinserting this and marking this as a tombstone,
+      // but it means you are increasing the number of tombstones for no reason.
+      continue;
+    }
 
     // mark as tombstone and reinsert.
     SetCtrl(common, pos, ctrl_t::kDeleted, slot_size);
@@ -433,19 +450,13 @@ void ClearTombstonesInRangeByRehashingCluster(
     // If Same Group, don't transfer.
     if (ABSL_PREDICT_TRUE(probe_index(new_i) == probe_index(pos))) {
       SetCtrl(common, pos, H2(hash), slot_size);
-      continue;
+      continue; 
     }
     // Otherwise move to destination.
     void *new_slot_ptr = SlotAddress(slot_array, new_i, slot_size);
     (*transfer)(set, new_slot_ptr, slot_ptr);
     SetCtrl(common, new_i, H2(hash), slot_size);
   }
-  // TODO: for Group::kWidth items after end, reinsert if homeslot is between
-  // start and end offset.
-  // checkRangeReachable(common, policy, start_offset, end_offset);
-  // checkRangeReachable(common, policy, 0, capacity);
-  // printf("After rebuilding\n");
-  // checkAllReachable(common, policy);
 }
 
 void ClearTombstonesInRange(
@@ -483,7 +494,7 @@ void ClearTombstonesInRange(
   assert(ctrl[start_offset] == ctrl_t::kEmpty);
   assert(ctrl[end_offset] == ctrl_t::kEmpty);
   // printf("Clearing [%ld %ld] TC: %ld\n", start_offset, end_offset, common.TombstonesCount());
-  // checkAllReachable(common, policy);
+  // CheckAllReachable(common, policy);
 
   // all items will have their homeslot between [candidate_hs_start, candidate_search_end].
   size_t candidate_hs_start = (start_offset - Group::kWidth) & capacity;
@@ -496,7 +507,7 @@ void ClearTombstonesInRange(
 
   size_t slot = start_offset;
   while(slot != end_offset) {
-    // checkAllReachable(common, policy);
+    // CheckAllReachable(common, policy);
     // outerProbeLength++;
     if (ctrl[slot] == ctrl_t::kSentinel) {
       slot++;
@@ -515,9 +526,9 @@ void ClearTombstonesInRange(
         assert(target_home_slot >= candidate_search_end || target_home_slot <= candidate_search_end);
       }
       
-      if(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==false) {
+      if(FindKey(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==false) {
         printf("lost value somehow: %ld\n", *(size_t *)(target_ptr));
-        assert(find_key(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true);
+        assert(FindKey(common, policy, *(size_t *)target_ptr, (*hasher)(set, target_ptr))==true);
       }
     }
     #endif
@@ -539,7 +550,7 @@ void ClearTombstonesInRange(
           }
           if (ctrl[candidate_slot & capacity] == ctrl_t::kSentinel) {
             // printf("  Wrapped around! %ld\n", candidate_slot);
-            // checkAllReachable(common, policy);
+            // CheckAllReachable(common, policy);
             // SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
             continue;
           }
@@ -570,9 +581,9 @@ void ClearTombstonesInRange(
             // printf("  TC: %ld\n", common.TombstonesCount());
             // printf("  Using %ld to plug %ld value (homeslot: %ld): %ld\n", candidate_slot, tombstone_slot, candidate_home_slot, *(size_t *)candidate_ptr);
             #if 0
-            if(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
+            if(FindKey(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==false) {
                // printf("%ld lost!\n", *(size_t *)tombstone_ptr);
-              assert(find_key(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==true);
+              assert(FindKey(common, policy, *(size_t *)tombstone_ptr, (*hasher)(set, tombstone_ptr))==true);
             }
             #endif
             break;
@@ -581,16 +592,16 @@ void ClearTombstonesInRange(
         // Mark as empty.
         if (!candidate_found) {
           // printf("Finally cleared a tombstone!!\n");
-          // checkAllReachable(common, policy);
+          // CheckAllReachable(common, policy);
           SetCtrl(common, (tombstone_slot & capacity), ctrl_t::kEmpty, slot_size);
-          // checkAllReachable(common, policy);
+          // CheckAllReachable(common, policy);
         }       
       }
       slot++;
       slot = slot & capacity;
   }
   // printf("outerProbeLength: %ld innerProbeLength: %ld\n", outerProbeLength, innerProbeLength);
-  // checkAllReachable(common, policy);
+  // CheckAllReachable(common, policy);
 }
 
 void DropDeletesWithoutResizeByPushingTombstones(
@@ -663,13 +674,6 @@ void DropDeletesWithoutResizeByRehashingClusters(
   ResetGrowthLeft(common);
 }
 
-// Returns true if pos2 is ahead of pos1 in a sequence that starts from start_offset. 
-bool IsAhead(size_t start_offset, size_t capacity, size_t pos1, size_t pos2) {
-  // Get Distance from start_offset
-  size_t dist1 = (pos1 - start_offset) & capacity;
-  size_t dist2 = (pos2 - start_offset) & capacity;
-  return dist2 > dist1;
-}
 
 void RedistributeTombstonesInRange(
   CommonFields& common,
@@ -724,7 +728,7 @@ void RedistributeTombstonesInRange(
     }
     if (IsFull(ctrl[slot_offset]) || !slot_passed_tombstone)continue;
 
-    // checkAllReachable(common, policy);
+    // CheckAllReachable(common, policy);
     // printf("Found an empty!: %ld %ld %ld\n", start_offset, end_offset, tombstone_distance);
     assert(IsEmpty(ctrl[slot_offset])); 
     const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
@@ -736,7 +740,7 @@ void RedistributeTombstonesInRange(
     primitive_tombstone_slot &= capacity;
     primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
     slot_passed_tombstone  = IsAhead(start_offset, capacity, primitive_tombstone_slot, slot_offset);
-    // checkAllReachable(common, policy);
+    // CheckAllReachable(common, policy);
   }
 }
 
