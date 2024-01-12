@@ -17,7 +17,7 @@ True Load Factor = (items + tombstones)/capacity
 	1. `raw_hash_set.h::CapacityToGrowth()`   Increases the max true load factor at which a rebuild should trigger. . The default max true load factor is 7/8, but with `ABSL_ZOMBIE` by the preprocessor symbol `ABSL_MAX_TRUE_LOAD_FACTOR`. The default value of `ABSL_MAX_TRUE_LOAD_FACTOR` is  0.975
 3. ABSL_ZOMBIE_GRAVEYARD
 	1. Requires ABSL_LINEAR_PROBING
-	2. After drop, runs `raw_hash_set.h::RedistributeTombstones` (See `raw_hash_set.h::rehash_and_grow_if_necessary`)
+	2. After clearing all tombstones, runs `raw_hash_set.h::RedistributeTombstones` or `raw_hash_set.h::RedistributeTombstonesInRange` (See `raw_hash_set.h::rehash_and_grow_if_necessary` and `raw_hash_set.h::prepare_insert`)
 4. ABSL_ZOMBIE_DEAMORTIZED
 	1. Rebuilds and redistributes tombstones in a deamortized fashion
 	2. See `raw_hash_set.h::prepare_insert()`
