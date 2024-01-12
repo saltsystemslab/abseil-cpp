@@ -681,6 +681,7 @@ void RedistributeTombstonesInRange(
   size_t start_offset,
   size_t end_offset,
   size_t tombstone_distance) {
+    // printf("Redistributing tombstones with distance: %ld %ld %ld\n", start_offset, end_offset, common.get_pts_distance()); 
   void* set = &common;
   void* slot_array = common.slot_array();
   const size_t capacity = common.capacity();
@@ -691,6 +692,7 @@ void RedistributeTombstonesInRange(
   bool wrapped_around = end_offset < start_offset;
 
   size_t primitive_tombstone_slot = (start_offset + tombstone_distance) & capacity;
+  if (primitive_tombstone_slot == capacity) primitive_tombstone_slot = 0;
   void* primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
   bool slot_passed_tombstone = false;
 
@@ -699,22 +701,28 @@ void RedistributeTombstonesInRange(
   while (true) {
     slot_offset++;
     slot_ptr = NextSlot(slot_ptr, slot_size);
+
     if (slot_offset==0 || ctrl[slot_offset] == ctrl_t::kSentinel) {
+      // wrap around.
       slot_offset = 0;
       slot_ptr = SlotAddress(slot_array, 0, slot_size);
     }
     if (slot_offset == end_offset) break;
 
+    // We went past the primitive tombstone slot, the next empty we see will be used to fill this.
     if (slot_offset == primitive_tombstone_slot) {
       slot_passed_tombstone = true;
       if (ctrl[slot_offset] == ctrl_t::kEmpty) {
+        // The PTS is already an empty slot. So advanve the pts pointer and continue.
         primitive_tombstone_slot += tombstone_distance;
         primitive_tombstone_slot &= capacity;
+        if (primitive_tombstone_slot == capacity) primitive_tombstone_slot = 0;
         primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
         slot_passed_tombstone  = IsAhead(start_offset, capacity, primitive_tombstone_slot, slot_offset);
       }
       continue;
     }
+
     assert(!IsDeleted(ctrl[slot_offset])); 
     if (IsFull(ctrl[slot_offset]))continue;
     assert(IsEmpty(ctrl[slot_offset]));
@@ -722,6 +730,7 @@ void RedistributeTombstonesInRange(
     if (!slot_passed_tombstone) {
       primitive_tombstone_slot = slot_offset + tombstone_distance;
       primitive_tombstone_slot &= capacity;
+      if (primitive_tombstone_slot == capacity) primitive_tombstone_slot = 0;
       primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
       slot_passed_tombstone  = false;
       continue;
@@ -738,6 +747,7 @@ void RedistributeTombstonesInRange(
 
     primitive_tombstone_slot += tombstone_distance;
     primitive_tombstone_slot &= capacity;
+    if (primitive_tombstone_slot == capacity) primitive_tombstone_slot = 0;
     primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
     slot_passed_tombstone  = IsAhead(start_offset, capacity, primitive_tombstone_slot, slot_offset);
     // CheckAllReachable(common, policy);

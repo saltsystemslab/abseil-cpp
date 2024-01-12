@@ -1140,10 +1140,13 @@ class CommonFields : public CommonFieldsGenerationInfo {
     return current_rebuild_pos_ < target_rebuild_pos_;
   }
 
+  // (1-(1-lf)), lf = size/capacity
   size_t get_load_factor_x() {
     return capacity()/(capacity()-size());
   }
 
+  // current: Where we have rebuilt until now.
+  // The next rebuild will start after here.
   size_t get_current_rebuild_pos() {
     return current_rebuild_pos_;
   }
@@ -1154,10 +1157,19 @@ class CommonFields : public CommonFieldsGenerationInfo {
     }
     current_rebuild_pos_ = pos;
   }
+
+  // We should aim to rebuild the entire hash table across n/(C_B * X) steps.
+  // Which means every insert, we should ideally rebuild (C_B * X).
+  // The target moves ahead by (C_B * X) on every insert.
+  // If we have not rebuilt until the target, we rebuild the next cluster.
   void advance_target_rebuild_pos() {
     target_rebuild_pos_ += (rebuild_window_multiplier) * get_load_factor_x();
     if (target_rebuild_pos_ > capacity()) target_rebuild_num_full_scans++;
     target_rebuild_pos_ = target_rebuild_pos_ & capacity();
+  }
+
+  size_t get_pts_distance() {
+    return (tombstone_distance_multiplier) * get_load_factor_x();
   }
  private:
   // We store the has_infoz bit in the lowest bit of size_.
@@ -1205,12 +1217,21 @@ class CommonFields : public CommonFieldsGenerationInfo {
   // size_t rebuild_cd = capacity/(4*x); 
   // size_t tombstone_distance = 2*x; // cb*x, there will be n/(2*x) primitive tombstones
   // Position to start rebuild window from.
-  #ifndef WINDOW_FACTOR
-  #define WINDOW_FACTOR 1
+  #ifndef C_B
+  #define C_B 1
   #endif
-  size_t rebuild_window_multiplier = WINDOW_FACTOR; // If I make this const, build fails.
+  #ifndef C_P
+  #define C_P 8
+  #endif
+  // If I make this const, build fails.
+  size_t rebuild_window_multiplier = C_B; 
+  size_t tombstone_distance_multiplier = C_P; 
+  // Where we should have rebuilt until now.
+  // If current_rebuild is behind target, 
+  // rebuild the next cluster to try and stay ahead of the target.
   size_t target_rebuild_num_full_scans = 0;
   size_t target_rebuild_pos_ = 0;
+  // Where we have rebuilt uptil now.
   size_t current_rebuild_num_full_scans = 0;
   size_t current_rebuild_pos_ = 0;
 };
@@ -3069,8 +3090,7 @@ class raw_hash_set {
     printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     drop_deletes_without_resize();
     #ifdef ABSL_ZOMBIE_GRAVEYARD
-    printf("Redistributing tombstones with distance: %ld\n" 4 * common().get_load_factor_x()); 
-    RedistributeTombstones(common(), GetPolicyFunctions(), 4 * common().get_load_factor_x());
+    RedistributeTombstones(common(), GetPolicyFunctions(), common().get_pts_distance());
     #endif
     printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     #else
@@ -3226,8 +3246,9 @@ class raw_hash_set {
     #ifdef ABSL_ZOMBIE_REBUILD_REHASH_CLUSTER
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     ClearTombstonesInRangeByRehashingCluster(common(), GetPolicyFunctions(), range_start, range_end, tmp);
-    #ifdef ABSL_ZOMBIE_REDISTRIBUTE_TOMBSTONES
-    RedistributeTombstonesInRange(common(), GetPolicyFunctions(), range_start, range_end, 2 * common().capacity()/(common().get_load_factor_x()));
+    #ifdef ABSL_ZOMBIE_GRAVEYARD
+    // Add tombstones if in ZOMBIE
+    RedistributeTombstonesInRange(common(), GetPolicyFunctions(), range_start, range_end, common().get_pts_distance());
     #endif
     common().set_current_rebuild_pos(range_end);
     #else
