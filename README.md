@@ -16,7 +16,6 @@ The relevant files needed are
 The important functions here are
 
 ```C++
-absl_raw_hash_set.h::
 absl_raw_hash_set.h::find_or_prepare_insert
 absl_raw_hash_set.h::prepare_insert
 absl_raw_hash_set.h::rehash_and_grow_if_necessary
