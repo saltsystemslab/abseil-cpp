@@ -17,7 +17,16 @@ True Load Factor = (items + tombstones)/capacity
 3. ABSL_ZOMBIE_GRAVEYARD
 	1. Requires ABSL_LINEAR_PROBING
 	2. After drop, runs `raw_hash_set.h::RedistributeTombstones` (See `raw_hash_set.h::rehash_and_grow_if_necessary`)
-5. ABSL_LINEAR_PROBING
+4. ABSL_ZOMBIE_DEAMORTIZED
+	1. Rebuilds and redistributes tombstones in a deamortized fashion
+	2. See `raw_hash_set.h::prepare_insert()`
+5. ABSL_ZOMBIE_REBUILD_REHASH_CLUSTER
+	1. Requires ABSL_LINEAR_PROBING
+	2. When used with ABSL_ZOMBIE_DEAMORTIZED, will clear from empty slot to empty slot
+	3. When not used with ABSL_ZOMBIE_DEAMORTIZED, will find consecutive clusters, rebuild that cluster until the entire hash table is rehashed.
+6. ABSL_ZOMBIE_REBUILD_PUSH_TOMBSTONES
+	1. Requires ABSL_LINEAR_PROBING
+	2. (Does not work with deamortized, not implemented)
 
 ## ABSL Variants
 
@@ -27,10 +36,31 @@ True Load Factor = (items + tombstones)/capacity
 2. ABSL_LINEAR_PROBING (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING)
 	1. Linear Probing. 
 	2. Rebuild by rehashing the entire hash table when true load factor is greater than 0.975
-3. ABSL_GRAVEYARD (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD)
+3. ABSL_LINEAR_REHASH_CLUSTER (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER)
 	1. Linear Probing
-	2. Rebuild by rehashing the entire hash table when true load factor is greater than 0.975
-	3. Add a tombstone every (4.x) positions.
+	2. Rebuilds whole hash table by **scanning for clusters, rehashing that cluster** when true load factor is greater than 0.975
+4. ABSL_LINEAR_REHASH_CLUSTER_DEAMORTIZED (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER -DABSL_ZOMBIE_DEAMORTIZED)
+	1. Linear Probing
+	2. Rebuilds in a deamortized fashion
+	3. Does not insert tombstones
+6. . ABSL_LINEAR_REHASH_CLUSTER_GRAVEYARD_DEAMORTIZED (DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_REBUILD_REHASH_CLUSTER -DABSL_ZOMBIE_DEAMORTIZED) 
+	1. Linear Probing
+	2. Rebuilds in a deamortized fashion, while also inserting tombstones
+	3. Inserts tombstones every 4.x, (x=1/(1-load factor)) distance.
+
+### Running Correctness Tests
+
+
+```bash
+# Set the required preprocessor flag variants in absl/container/BUILD.bazel in targets raw_hash_set_zombie_test and raw_hash_set_zombie_variant
+
+bazel build //absl/container:raw_hash_set_zombie_test --compilation_mode=dbg
+
+gdb --args bazel-bin/absl/container/raw_hash_set_zombie_test --gtest_filter=Table.ChurnTestSmall
+
+bazel-bin/absl/container/raw_hash_set_zombie_test --gtest_filter=Table.ChurnTestSmall
+
+```
 
 
 
