@@ -643,7 +643,7 @@ cc_library(
     name = "raw_hash_set",
     srcs = ["internal/raw_hash_set.cc"],
     hdrs = ["internal/raw_hash_set.h"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE"],
+    copts = ABSL_DEFAULT_COPTS,
     linkopts = ABSL_DEFAULT_LINKOPTS,
     deps = [
         ":common",
@@ -665,260 +665,11 @@ cc_library(
         "//absl/utility",
     ],
 )
-
-cc_library(
-    name = "raw_hash_set_zombie_linear",
-    srcs = ["internal/raw_hash_set.cc"],
-    hdrs = ["internal/raw_hash_set.h"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING"],
-    linkopts = ABSL_DEFAULT_LINKOPTS,
-    deps = [
-        ":common",
-        ":compressed_tuple",
-        ":container_memory",
-        ":hash_policy_traits",
-        ":hashtable_debug_hooks",
-        ":hashtablez_sampler",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:dynamic_annotations",
-        "//absl/base:endian",
-        "//absl/base:prefetch",
-        "//absl/base:raw_logging_internal",
-        "//absl/hash",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/numeric:bits",
-        "//absl/utility",
-    ],
-)
-
-cc_library(
-    name = "raw_hash_set_zombie_rehash_range_deamortized",
-    srcs = ["internal/raw_hash_set.cc"],
-    hdrs = ["internal/raw_hash_set.h"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_DEAMORTIZED -DABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE"],
-
-    linkopts = ABSL_DEFAULT_LINKOPTS,
-    deps = [
-        ":common",
-        ":compressed_tuple",
-        ":container_memory",
-        ":hash_policy_traits",
-        ":hashtable_debug_hooks",
-        ":hashtablez_sampler",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:dynamic_annotations",
-        "//absl/base:endian",
-        "//absl/base:prefetch",
-        "//absl/base:raw_logging_internal",
-        "//absl/hash",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/numeric:bits",
-        "//absl/utility",
-    ],
-)
-
-cc_test(
-    name = "raw_hash_set_test_zombie_graveyard_rehash_range_deamortized",
-    srcs = ["internal/raw_hash_set_test.cc"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_DEAMORTIZED -DABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE"],
-    linkstatic = 1,
-    tags = NOTEST_TAGS_MOBILE + [
-        "no_test_loonix",
-        # TODO(b/237097643): investigate race and remove
-        "noarm_gemu",
-    ],
-    deps = [
-        ":container_memory",
-        ":flat_hash_map",
-        ":flat_hash_set",
-        ":hash_function_defaults",
-        ":hash_policy_testing",
-        ":hashtable_debug",
-        ":hashtablez_sampler",
-        ":raw_hash_set_zombie_rehash_range_deamortized",
-        ":test_allocator",
-        "//absl/base",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:prefetch",
-        "//absl/hash",
-        "//absl/log",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/strings",
-        "@com_google_googletest//:gtest",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-
-cc_library(
-    name = "raw_hash_set_zombie_rehash_range",
-    srcs = ["internal/raw_hash_set.cc"],
-    hdrs = ["internal/raw_hash_set.h"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_GR_REBIULD_REHASH_RANGE"],
-
-    linkopts = ABSL_DEFAULT_LINKOPTS,
-    deps = [
-        ":common",
-        ":compressed_tuple",
-        ":container_memory",
-        ":hash_policy_traits",
-        ":hashtable_debug_hooks",
-        ":hashtablez_sampler",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:dynamic_annotations",
-        "//absl/base:endian",
-        "//absl/base:prefetch",
-        "//absl/base:raw_logging_internal",
-        "//absl/hash",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/numeric:bits",
-        "//absl/utility",
-    ],
-)
-
-cc_test(
-    name = "raw_hash_set_test_zombie_graveyard_rehash_range",
-    srcs = ["internal/raw_hash_set_test.cc"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE"],
-    linkstatic = 1,
-    tags = NOTEST_TAGS_MOBILE + [
-        "no_test_loonix",
-        # TODO(b/237097643): investigate race and remove
-        "noarm_gemu",
-    ],
-    deps = [
-        ":container_memory",
-        ":flat_hash_map",
-        ":flat_hash_set",
-        ":hash_function_defaults",
-        ":hash_policy_testing",
-        ":hashtable_debug",
-        ":hashtablez_sampler",
-        ":raw_hash_set_zombie_rehash_range",
-        ":test_allocator",
-        "//absl/base",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:prefetch",
-        "//absl/hash",
-        "//absl/log",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/strings",
-        "@com_google_googletest//:gtest",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_library(
-    name = "raw_hash_set_zombie_graveyard_push_tombstones",
-    srcs = ["internal/raw_hash_set.cc"],
-    hdrs = ["internal/raw_hash_set.h"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_GR_REBIULD_PUSH_TOMBSTONES"],
-    linkopts = ABSL_DEFAULT_LINKOPTS,
-    deps = [
-        ":common",
-        ":compressed_tuple",
-        ":container_memory",
-        ":hash_policy_traits",
-        ":hashtable_debug_hooks",
-        ":hashtablez_sampler",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:dynamic_annotations",
-        "//absl/base:endian",
-        "//absl/base:prefetch",
-        "//absl/base:raw_logging_internal",
-        "//absl/hash",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/numeric:bits",
-        "//absl/utility",
-    ],
-)
-
-cc_test(
-    name = "raw_hash_set_test_zombie_graveyard_push_tombstones",
-    srcs = ["internal/raw_hash_set_test.cc"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD -DABSL_ZOMBIE_GR_REBUILD_PUSH_TOMBSTONES"],
-    linkstatic = 1,
-    tags = NOTEST_TAGS_MOBILE + [
-        "no_test_loonix",
-        # TODO(b/237097643): investigate race and remove
-        "noarm_gemu",
-    ],
-    deps = [
-        ":container_memory",
-        ":flat_hash_map",
-        ":flat_hash_set",
-        ":hash_function_defaults",
-        ":hash_policy_testing",
-        ":hashtable_debug",
-        ":hashtablez_sampler",
-        ":raw_hash_set_zombie_linear",
-        ":test_allocator",
-        "//absl/base",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:prefetch",
-        "//absl/hash",
-        "//absl/log",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/strings",
-        "@com_google_googletest//:gtest",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "raw_hash_set_test_zombie_linear",
-    srcs = ["internal/raw_hash_set_test.cc"],
-    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING"],
-    linkstatic = 1,
-    tags = NOTEST_TAGS_MOBILE + [
-        "no_test_loonix",
-        # TODO(b/237097643): investigate race and remove
-        "noarm_gemu",
-    ],
-    deps = [
-        ":container_memory",
-        ":flat_hash_map",
-        ":flat_hash_set",
-        ":hash_function_defaults",
-        ":hash_policy_testing",
-        ":hashtable_debug",
-        ":hashtablez_sampler",
-        ":raw_hash_set_zombie_linear",
-        ":test_allocator",
-        "//absl/base",
-        "//absl/base:config",
-        "//absl/base:core_headers",
-        "//absl/base:prefetch",
-        "//absl/hash",
-        "//absl/log",
-        "//absl/memory",
-        "//absl/meta:type_traits",
-        "//absl/strings",
-        "@com_google_googletest//:gtest",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-
 
 cc_test(
     name = "raw_hash_set_test",
     srcs = ["internal/raw_hash_set_test.cc"],
-    copts = ABSL_TEST_COPTS + ['-DABSL_ZOMBIE'],
+    copts = ABSL_TEST_COPTS,
     linkstatic = 1,
     tags = NOTEST_TAGS_MOBILE + [
         "no_test_loonix",
@@ -948,6 +699,73 @@ cc_test(
         "@com_google_googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "raw_hash_set_zombie_variant",
+    srcs = ["internal/raw_hash_set.cc"],
+    hdrs = ["internal/raw_hash_set.h"],
+    # ADD ZOMBIE VARIANT PREPROCESSOR FLAGS HERE. 
+    # SEE README.MD for list of symbols for each variant.
+    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING"],
+    linkopts = ABSL_DEFAULT_LINKOPTS,
+    deps = [
+        ":common",
+        ":compressed_tuple",
+        ":container_memory",
+        ":hash_policy_traits",
+        ":hashtable_debug_hooks",
+        ":hashtablez_sampler",
+        "//absl/base:config",
+        "//absl/base:core_headers",
+        "//absl/base:dynamic_annotations",
+        "//absl/base:endian",
+        "//absl/base:prefetch",
+        "//absl/base:raw_logging_internal",
+        "//absl/hash",
+        "//absl/memory",
+        "//absl/meta:type_traits",
+        "//absl/numeric:bits",
+        "//absl/utility",
+    ],
+)
+
+
+cc_test(
+    name = "raw_hash_set_zombie_test",
+    srcs = ["internal/raw_hash_set_test.cc"],
+    # ADD ZOMBIE VARIANT PREPROCESSOR FLAGS HERE. 
+    # SEE README.MD for list of symbols for each variant.
+    copts = ABSL_DEFAULT_COPTS + ["-DABSL_ZOMBIE -DABSL_LINEAR_PROBING"],
+    linkstatic = 1,
+    tags = NOTEST_TAGS_MOBILE + [
+        "no_test_loonix",
+        # TODO(b/237097643): investigate race and remove
+        "noarm_gemu",
+    ],
+    deps = [
+        ":container_memory",
+        ":flat_hash_map",
+        ":flat_hash_set",
+        ":hash_function_defaults",
+        ":hash_policy_testing",
+        ":hashtable_debug",
+        ":hashtablez_sampler",
+        ":raw_hash_set_zombie_variant",
+        ":test_allocator",
+        "//absl/base",
+        "//absl/base:config",
+        "//absl/base:core_headers",
+        "//absl/base:prefetch",
+        "//absl/hash",
+        "//absl/log",
+        "//absl/memory",
+        "//absl/meta:type_traits",
+        "//absl/strings",
+        "@com_google_googletest//:gtest",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
 
 cc_binary(
     name = "raw_hash_set_benchmark",
@@ -987,29 +805,6 @@ cc_binary(
         "//absl/strings:str_format",
     ],
 )
-
-cc_binary(
-    name = "raw_hash_set_probe_benchmark_zlp",
-    testonly = 1,
-    srcs = ["internal/raw_hash_set_probe_benchmark.cc"],
-    copts = ABSL_TEST_COPTS,
-    linkopts = select({
-        "//conditions:default": [],
-    }) + ABSL_DEFAULT_LINKOPTS,
-    tags = ["benchmark"],
-    visibility = ["//visibility:private"],
-    deps = [
-        ":flat_hash_map",
-        ":hash_function_defaults",
-        ":hashtable_debug",
-        ":raw_hash_set_zombie",
-        "//absl/random",
-        "//absl/random:distributions",
-        "//absl/strings",
-        "//absl/strings:str_format",
-    ],
-)
-
 
 cc_test(
     name = "raw_hash_set_allocator_test",

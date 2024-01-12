@@ -5,30 +5,36 @@ WARNING: If using ABSL_ZOMBIE option, you need to reserve space to use the hashm
 h.reserve(1196)
 ```
 
+## List of Preprocessor Flags
 
-## Quickstart
+Load Factor = items / capacity
+True Load Factor = (items + tombstones)/capacity
 
-```bash
-mkdir build
-cd build
-cmake ../ -DCMAKE_BUILD_TYPE=Debug  -DZOMBIE_LINEAR_PROBING=ON -DABSL_GOOGLETEST_DOWNLOAD_URL=https://github.com/google/googletest/archive/2dd1c131950043a8ad5ab0d2dda0e0970596586a.zip -DABSL_BUILD_TESTING=ON
-make -j
-./bin/absl_raw_hash_set_test
-```
+1. ABSL_LINEAR_PROBING
+	1. Uses a linear probing function. Used in `raw_hash_set.h::probe_seq (Line 326)`
+2. ABSL_ZOMBIE
+	1. `raw_hash_set.h::CapacityToGrowth()`   Increases the max true load factor at which a rebuild should trigger. . The default max true load factor is 7/8, but with `ABSL_ZOMBIE` by the preprocessor symbol `ABSL_MAX_TRUE_LOAD_FACTOR`. The default value of `ABSL_MAX_TRUE_LOAD_FACTOR` is  0.975
+3. ABSL_ZOMBIE_GRAVEYARD
+	1. Requires ABSL_LINEAR_PROBING
+	2. After drop, runs `raw_hash_set.h::RedistributeTombstones` (See `raw_hash_set.h::rehash_and_grow_if_necessary`)
+5. ABSL_LINEAR_PROBING
 
-### To run probe benchmark
+## ABSL Variants
 
-(Not sure what the probe benchmark does yet.)
+1. ABSL (-DABSL_ZOMBIE)
+	1. Quadratic Probing. 
+	2. Rebuild by rehashing the entire hash table when true load factor is greater than 0.975
+2. ABSL_LINEAR_PROBING (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING)
+	1. Linear Probing. 
+	2. Rebuild by rehashing the entire hash table when true load factor is greater than 0.975
+3. ABSL_GRAVEYARD (-DABSL_ZOMBIE -DABSL_LINEAR_PROBING -DABSL_ZOMBIE_GRAVEYARD)
+	1. Linear Probing
+	2. Rebuild by rehashing the entire hash table when true load factor is greater than 0.975
+	3. Add a tombstone every (4.x) positions.
 
-```bash
-# Get Bazel, add below binary to $PATH as bazel
-wget https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
 
-bazel run raw_hash_set_probe_benchmark
-bazel run raw_hash_set_probe_benchmark_zlp
-```
 
-## Notes
+## Raw Notes
 
 ```c++
 // absl/container/flat_hash_map.h
