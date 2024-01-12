@@ -45,9 +45,12 @@ True Load Factor = (items + tombstones)/capacity
 	3. When not used with ABSL_ZOMBIE_DEAMORTIZED, will find consecutive clusters, rebuild that cluster until the entire hash table is rehashed.
 6. ABSL_ZOMBIE_REBUILD_PUSH_TOMBSTONES
 	1. Requires ABSL_LINEAR_PROBING
-	2. (Does not work with deamortized, not implemented)
+        2. Will rebuild by pushing tombstones.	
+	3. (Does not work with deamortized, not implemented)
 
 ## ABSL Variants
+
+Each of the variants here are also defined in [CMakeLists.txt](https://github.com/saltsystemslab/GRHT/blob/master/CMakeLists.txt#L70) of the GRHT project.
 
 1. ABSL (-DABSL_ZOMBIE)
 	1. Quadratic Probing. 
@@ -70,6 +73,7 @@ True Load Factor = (items + tombstones)/capacity
 
 ### Running Correctness Tests
 
+Install bazel via [bazelisk](https://github.com/bazelbuild/bazelisk?tab=readme-ov-file#installation)
 
 ```bash
 # Set the required preprocessor flag variants in absl/container/BUILD.bazel in targets raw_hash_set_zombie_test and raw_hash_set_zombie_variant
@@ -81,8 +85,6 @@ gdb --args bazel-bin/absl/container/raw_hash_set_zombie_test --gtest_filter=Tabl
 bazel-bin/absl/container/raw_hash_set_zombie_test --gtest_filter=Table.ChurnTestSmall
 
 ```
-
-
 
 ## Raw Notes
 
