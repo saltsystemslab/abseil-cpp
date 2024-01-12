@@ -1246,34 +1246,28 @@ inline size_t NormalizeCapacity(size_t n) {
   return n ? ~size_t{} >> countl_zero(n) : 1;
 }
 
-// General notes on capacity/growth methods below:
-// - We use 7/8th as maximum load factor. For 16-wide groups, that gives an
-//   average of two empty slots per group.
-// - For (capacity+1) >= Group::kWidth, growth is 7/8*capacity.
-// - For (capacity+1) < Group::kWidth, growth == capacity. In this case, we
-//   never need to probe (the whole table fits in one group) so we don't need a
-//   load factor less than 1.
-// Zombie: Fixed at 0.975.
 #ifndef CX
 #define CX 0.975
 #endif
+
 // Given `capacity`, applies the load factor; i.e., it returns the maximum
 // number of values we should put into the table before a resizing rehash.
 inline size_t CapacityToGrowth(size_t capacity) {
   assert(IsValidCapacity(capacity));
-  #ifndef ABSL_ZOMBIE
-  // Old Code.
+  #ifdef ABSL_ZOMBIE
+  // Increases the max true load factor at which a 
+  // rebuild should trigger. . The default max true 
+  // load factor is 7/8, but with `ABSL_ZOMBIE` by 
+  // the preprocessor symbol `CX`. The default value 
+  // of CX is 0.975
+  return capacity * CX;
+  #else
   // `capacity*7/8`
   if (Group::kWidth == 8 && capacity == 7) {
     // x-x/8 does not work when x==7.
     return 6;
   }
   return capacity - capacity / 8;
-  #else
-  // This determines rebuild window.
-  // Why 0.975? This is for max load factor 0.95, when X=20
-  // C(1-1/X) + C/2X = Capacity growth.
-  return capacity * CX;
   #endif
 }
 
@@ -1894,7 +1888,7 @@ ABSL_ATTRIBUTE_NOINLINE void TransferRelocatable(void*, void* dst, void* src) {
 void DropDeletesWithoutResize(CommonFields& common,
                               const PolicyFunctions& policy, void* tmp_space);
 void RedistributeTombstones(CommonFields& common,
-                              const PolicyFunctions& policy, int tombstone_distance, void* tmp_space);
+                              const PolicyFunctions& policy, int tombstone_distance);
 void RedistributeTombstonesInRange(
   CommonFields& common,
   const PolicyFunctions& policy,
@@ -3052,22 +3046,15 @@ class raw_hash_set {
   // See the comment on `rehash_and_grow_if_necessary()`.
   inline void drop_deletes_without_resize() {
     // Stack-allocate space for swapping elements.
-    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
-    DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
-    get_size();
-  }
-
-  inline void drop_deletes_without_resize_and_redistribute(size_t tombstone_distance) {
-    // Stack-allocate space for swapping elements.
     #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     DropDeletesWithoutResizeByRehashingRange(common(), GetPolicyFunctions(), 0, tmp);
     #elif ABSL_ZOMBIE_GR_REBUILD_PUSH_TOMBSTONES
     DropDeletesWithoutResizeByPushingTombstones(common(), GetPolicyFunctions(), 0);
     #else
-    abort();
+    alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
+    DropDeletesWithoutResize(common(), GetPolicyFunctions(), tmp);
     #endif
-    get_size();
   }
 
 private:
@@ -3077,6 +3064,16 @@ private:
   // growth is unnecessary, because vacating tombstones is beneficial for
   // performance in the long-run.
   void rehash_and_grow_if_necessary() {
+    #ifdef ABSL_ZOMBIE
+    printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
+    drop_deletes_without_resize();
+    #ifdef ABSL_ZOMBIE_GRAVEYARD
+    printf("%ld\n", 4 * common().get_load_factor_x());
+    printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
+    RedistributeTombstones(common(), GetPolicyFunctions(), 4 * common().get_load_factor_x());
+    #endif
+    printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
+    #else
     const size_t cap = capacity();
     if (cap > Group::kWidth &&
         // Do these calculations in 64-bit to avoid overflow.
@@ -3122,30 +3119,11 @@ private:
       //  762 | 149836       0.37        13 | 148559       0.74       190
       //  807 | 149736       0.39        14 | 151107       0.39        14
       //  852 | 150204       0.42        15 | 151019       0.42        15
-      printf("Before DROPs: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
       drop_deletes_without_resize();
-      printf("After DROPs: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     } else {
-      // Otherwise grow the container.
-      #ifndef ABSL_ZOMBIE 
-      // Old Code.
       resize(NextCapacity(cap));
-      #elif ABSL_ZOMBIE_GRAVEYARD
-      // Graveyard - Clear and redistribute tombstones.
-      // Disable resizing.
-      // x=1/(1-lf), lf = 0.95, x = 20.
-      // place a tombstone every n/4x position
-      printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
-      drop_deletes_without_resize_and_redistribute(80);
-      printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
-      #else
-      // Standard Tombstone clearing: Clear all tombstones out. Valid for both linear and quadratic probing.
-      // Disable resizing.
-      printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
-      drop_deletes_without_resize();
-      printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
-      #endif
     }
+    #endif
   }
 
   void maybe_increment_generation_or_rehash_on_move() {

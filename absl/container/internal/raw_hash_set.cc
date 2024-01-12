@@ -758,7 +758,7 @@ void RedistributeTombstonesInRange(
 // Should be called right after DropDeletesWithoutResize.
 // Scans the entire hash table and places a tombstone (deleted marker) every tombstone_distance spot.
 void RedistributeTombstones(CommonFields& common,
-                              const PolicyFunctions& policy, int tombstone_distance, void* tmp_space) {
+                              const PolicyFunctions& policy, int tombstone_distance) {
   void* set = &common;
   void* slot_array = common.slot_array();
   const size_t capacity = common.capacity();
@@ -799,9 +799,7 @@ void RedistributeTombstones(CommonFields& common,
         const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
         SetCtrl(common, i, H2(hash), slot_size);
         // Swap i and new_i elements.
-        (*transfer)(set, tmp_space, primitive_tombstone_ptr);
-        (*transfer)(set, primitive_tombstone_ptr, slot_ptr);
-        (*transfer)(set, slot_ptr, tmp_space);
+        (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
         SetCtrl(common, next_primitive_tombstone, ctrl_t::kDeleted, slot_size);
 
         next_primitive_tombstone += tombstone_distance;
