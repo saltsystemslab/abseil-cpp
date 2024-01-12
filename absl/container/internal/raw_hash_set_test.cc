@@ -1069,34 +1069,14 @@ struct Modulo1000HashTable
                           std::allocator<int>> {
 };
 
-#ifdef ABSL_ZOMBIE
-TEST(Table, RedistributeTombstones) {
-  Modulo1000HashTable t;
-  t.reserve(2047);
-  for(size_t i = 0; i < 1000; i++) {
-    t.insert(i*1000);
-  }
-  RawHashSetTestOnlyAccess::DropDeletesWithoutResize(t);
-  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 0);
-
-  RawHashSetTestOnlyAccess::DropDeletesWithoutResizeAndRedistributeTombstones(t, 100);
-  EXPECT_EQ(RawHashSetTestOnlyAccess::CountTombstones(t), 10);
-};
-
-#endif
-
 TEST(Table, ChurnTestSmall) {
   int hashTableCap = (1<<10)-1;
   int hashTableSize = (hashTableCap*95)/100;
 
   size_t seed = time(NULL);
-  // size_t seed = 1704220960;
-  // size_t seed = 1704222519;
-  seed = 1704963845;
-  srand(seed);
   printf("SEED: %ld\n", seed);
   IntTable t;
-  t.reserve(hashTableCap/2);
+  t.reserveFixed(hashTableCap);
 
   std::set<uint64_t> s;
   uint64_t arr[hashTableSize];

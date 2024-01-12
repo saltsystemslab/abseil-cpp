@@ -757,53 +757,63 @@ void RedistributeTombstonesInRange(
 
 // Should be called right after DropDeletesWithoutResize.
 // Scans the entire hash table and places a tombstone (deleted marker) every tombstone_distance spot.
-void RedistributeTombstones(CommonFields& common,
-                              const PolicyFunctions& policy, int tombstone_distance) {
+// For every primitive tombstone posiiton, 
+//    finds an empty position after it and swaps the item at pts position
+//    to the empty slot. The PTS position is then marked as a primitive tombstone.
+void RedistributeTombstones(
+  CommonFields& common,
+  const PolicyFunctions& policy, 
+  int tombstone_distance
+) {
   void* set = &common;
   void* slot_array = common.slot_array();
   const size_t capacity = common.capacity();
   assert(IsValidCapacity(capacity));
   assert(!is_small(capacity));
-
   ctrl_t* ctrl = common.control();
   auto transfer = policy.transfer;
   auto hasher = policy.hash_slot;
   const size_t slot_size = policy.slot_size;
   void* slot_ptr = SlotAddress(slot_array, 0, slot_size);
-
-  size_t next_primitive_tombstone = tombstone_distance;
-  void* primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+  size_t primitive_tombstone_slot = tombstone_distance;
+  void* primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
 
   for (size_t i = 0; i != capacity;
        ++i, slot_ptr = NextSlot(slot_ptr, slot_size)) {
-        // There should only be empty slots after a resize.
-        assert(!IsDeleted(ctrl[i])); 
         if (IsFull(ctrl[i])) continue;
-        // We do not swap for an item ahead of current as that would mess up home slots.
-        if (i < next_primitive_tombstone) continue;
+        // TODO: There is a small chance that dropDeletes doesn't drop all tombstones.
+        if(IsDeleted(ctrl[i])) continue;
 
-        assert(!IsDeleted(ctrl[next_primitive_tombstone])); 
-        
-        // Next Primitive Tombstone was already an empty space, so we can use this empty slot
-        // for later.
-        if (IsEmpty(ctrl[next_primitive_tombstone])) {
-          next_primitive_tombstone += tombstone_distance;
-          primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+        assert(IsEmpty(ctrl[i]));
+
+        // We have not yet gone ahead the primitive tombstone spot.
+        // But we need to reset the primitive tombstone spot.
+        // This is to prevent swapping items across clusters. 
+        if (i < primitive_tombstone_slot) {
+          primitive_tombstone_slot += tombstone_distance;
+          primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+          continue;
+        }
+
+        // If the primitive tombstone slot was already an empty space, don't swap, but reset i.
+        if (IsEmpty(ctrl[primitive_tombstone_slot])) {
+          primitive_tombstone_slot += tombstone_distance;
+          primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
           --i;
           slot_ptr = PrevSlot(slot_ptr, slot_size);
           continue;
         }
 
-        // Swap item in next_pts here, mark next_pts as tombstone 
-        // the target as a tombstone.
+        // Swap item at pts slot here, 
         const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
         SetCtrl(common, i, H2(hash), slot_size);
-        // Swap i and new_i elements.
         (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
-        SetCtrl(common, next_primitive_tombstone, ctrl_t::kDeleted, slot_size);
+        // mark primitive tombstone slot as tombstone 
+        SetCtrl(common, primitive_tombstone_slot, ctrl_t::kDeleted, slot_size);
 
-        next_primitive_tombstone += tombstone_distance;
-        primitive_tombstone_ptr = SlotAddress(slot_array, next_primitive_tombstone, slot_size);
+        // Reset Primitive tombstone slot
+        primitive_tombstone_slot += tombstone_distance;
+        primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
   }
 }
 

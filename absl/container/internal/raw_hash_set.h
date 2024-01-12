@@ -658,13 +658,6 @@ struct GroupSse2Impl {
         _mm_movemask_epi8(_mm_cmpgt_epi8_fixed(special, ctrl))));
   }
 
-  // Returns a bitmask representing the positions of empty or deleted slots.
-  BitMask<uint16_t, kWidth> MaskEmptyOrDeletedIterable() const {
-    auto special = _mm_set1_epi8(static_cast<char>(ctrl_t::kSentinel));
-    return BitMask<uint16_t, kWidth>(static_cast<uint16_t>(
-        _mm_movemask_epi8(_mm_cmpgt_epi8_fixed(special, ctrl))));
-  }
-
   // Returns the number of trailing empty or deleted elements in the group.
   uint32_t CountLeadingEmptyOrDeleted() const {
     auto special = _mm_set1_epi8(static_cast<char>(ctrl_t::kSentinel));
@@ -1246,9 +1239,17 @@ inline size_t NormalizeCapacity(size_t n) {
   return n ? ~size_t{} >> countl_zero(n) : 1;
 }
 
-#ifndef CX
-#define CX 0.975
+#ifndef ABSL_MAX_TRUE_LOAD_FACTOR
+#define ABSL_MAX_TRUE_LOAD_FACTOR 0.975
 #endif
+
+// General notes on capacity/growth methods below:
+// - We use 7/8th as maximum load factor. For 16-wide groups, that gives an
+//   average of two empty slots per group.
+// - For (capacity+1) >= Group::kWidth, growth is 7/8*capacity.
+// - For (capacity+1) < Group::kWidth, growth == capacity. In this case, we
+//   never need to probe (the whole table fits in one group) so we don't need a
+//   load factor less than 1.
 
 // Given `capacity`, applies the load factor; i.e., it returns the maximum
 // number of values we should put into the table before a resizing rehash.
@@ -1260,7 +1261,7 @@ inline size_t CapacityToGrowth(size_t capacity) {
   // load factor is 7/8, but with `ABSL_ZOMBIE` by 
   // the preprocessor symbol `CX`. The default value 
   // of CX is 0.975
-  return capacity * CX;
+  return capacity * ABSL_MAX_TRUE_LOAD_FACTOR;
   #else
   // `capacity*7/8`
   if (Group::kWidth == 8 && capacity == 7) {
@@ -3057,7 +3058,6 @@ class raw_hash_set {
     #endif
   }
 
-private:
   // Called whenever the table *might* need to conditionally grow.
   //
   // This function is an optimization opportunity to perform a rehash even when
@@ -3068,7 +3068,6 @@ private:
     printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     drop_deletes_without_resize();
     #ifdef ABSL_ZOMBIE_GRAVEYARD
-    printf("%ld\n", 4 * common().get_load_factor_x());
     printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     RedistributeTombstones(common(), GetPolicyFunctions(), 4 * common().get_load_factor_x());
     #endif
@@ -3121,6 +3120,7 @@ private:
       //  852 | 150204       0.42        15 | 151019       0.42        15
       drop_deletes_without_resize();
     } else {
+      // Otherwise grow the container.
       resize(NextCapacity(cap));
     }
     #endif
