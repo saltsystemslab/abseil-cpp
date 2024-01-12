@@ -1901,10 +1901,9 @@ void DropDeletesWithoutResizeByPushingTombstones(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset);
-void DropDeletesWithoutResizeByRehashingRange(
+void DropDeletesWithoutResizeByRehashingClusters(
   CommonFields& common,
-  const PolicyFunctions& policy, 
-  size_t start_offset, void *tmp_space);
+  const PolicyFunctions& policy, void *tmp_space);
 
 void ClearTombstonesInRangeByRehashing(
   CommonFields& common,
@@ -3047,10 +3046,10 @@ class raw_hash_set {
   // See the comment on `rehash_and_grow_if_necessary()`.
   inline void drop_deletes_without_resize() {
     // Stack-allocate space for swapping elements.
-    #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
+    #ifdef ABSL_ZOMBIE_REBUILD_REHASH_CLUSTER
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
-    DropDeletesWithoutResizeByRehashingRange(common(), GetPolicyFunctions(), 0, tmp);
-    #elif ABSL_ZOMBIE_GR_REBUILD_PUSH_TOMBSTONES
+    DropDeletesWithoutResizeByRehashingClusters(common(), GetPolicyFunctions(), tmp);
+    #elif ABSL_ZOMBIE_REBUILD_PUSH_TOMBSTONES
     DropDeletesWithoutResizeByPushingTombstones(common(), GetPolicyFunctions(), 0);
     #else
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
@@ -3068,7 +3067,7 @@ class raw_hash_set {
     printf("Before DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
     drop_deletes_without_resize();
     #ifdef ABSL_ZOMBIE_GRAVEYARD
-    printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
+    printf("Redistributing tombstones with distance: %ld\n" 4 * common().get_load_factor_x()); 
     RedistributeTombstones(common(), GetPolicyFunctions(), 4 * common().get_load_factor_x());
     #endif
     printf("After DROP: Capacity: %lu Size: %lu TC: %lu GrowthLeft: %lu\n", common().capacity(), common().size(), common().TombstonesCount(), growth_left());
@@ -3243,7 +3242,7 @@ class raw_hash_set {
     }
     range_end = range_end & capacity;
     // printf("rebuilding %ld %ld size: %ld tc: %ld\n", range_start, range_end, common().size(), common().TombstonesCount());
-    #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
+    #ifdef ABSL_ZOMBIE_REBUILD_REHASH_CLUSTER
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     ClearTombstonesInRangeByRehashing(common(), GetPolicyFunctions(), range_start, range_end, tmp);
     #ifdef ABSL_ZOMBIE_REDISTRIBUTE_TOMBSTONES

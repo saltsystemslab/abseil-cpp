@@ -192,6 +192,17 @@ bool checkAllReachable(
   return true;
 }
 
+bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size_t position) {
+  if (wrapped_around) {
+    assert(end_offset <= start_offset);
+    return (position > start_offset || position < end_offset);
+  } else {
+    assert(end_offset >= start_offset);
+    return (position > start_offset && position < end_offset);
+  }
+}
+
+
 bool checkRangeReachable(
   CommonFields& common,
   const PolicyFunctions& policy,
@@ -260,7 +271,24 @@ void ConvertDeletedToEmptyAndFullToDeletedInRange(ctrl_t* ctrl, size_t start_off
   ctrl[capacity] = ctrl_t::kSentinel;
 }
 
-void ClearTombstonesInRangeByRehashing(
+size_t FindNextEmptySlot(ctrl_t * ctrl, size_t start_slot, size_t capacity, size_t *probe_length) {
+  probe_seq<Group::kWidth> seq(start_slot, capacity);
+  // Find an empty.
+  while (true) {
+    GroupEmptyOrDeleted g{ctrl + seq.offset()};
+    auto mask = g.MaskEmpty();
+    if (mask) {
+      return seq.offset() + mask.LowestBitSet();
+      break;
+    }
+    *probe_length = *probe_length + Group::kWidth;
+    seq.next();
+  }
+  abort(); // Should never reach here.
+  return 0;
+}
+
+void ClearTombstonesInRangeByRehashingCluster(
   CommonFields& common,
   const PolicyFunctions& policy, 
   size_t start_offset,
@@ -298,7 +326,7 @@ void ClearTombstonesInRangeByRehashing(
   const size_t slot_size = policy.slot_size;
   auto hasher = policy.hash_slot;
   auto transfer = policy.transfer;
-  bool range_broken = end_offset < start_offset;
+  bool cluster_wraps_around = end_offset < start_offset;
   // printf("Before rebuild\n");
   // checkAllReachable(common, policy);
   // checkRangeReachable(common, policy, 0, capacity);
@@ -320,13 +348,13 @@ void ClearTombstonesInRangeByRehashing(
       break;
     }
     if (ABSL_PREDICT_FALSE(ctrl[pos] == ctrl_t::kSentinel)) {
+      // Wrap around.
       pos = 0;
       slot_ptr = SlotAddress(slot_array, pos, slot_size);
       continue;
     }
     assert(slot_ptr == SlotAddress(slot_array, pos, slot_size));
     if (!IsDeleted(ctrl[pos])) {
-      // printf("%ld empty\n", pos);
       pos = pos + 1;
       slot_ptr = NextSlot(slot_ptr, slot_size);
       continue;
@@ -340,6 +368,7 @@ void ClearTombstonesInRangeByRehashing(
     };
 
     // Element doesn't move.
+    // It's already in same probe sequence if it would have shifted, so no point shifting.
     if (ABSL_PREDICT_TRUE(probe_index(new_i) == probe_index(pos))) {
       SetCtrl(common, pos, H2(hash), slot_size);
       pos = pos + 1;
@@ -360,15 +389,7 @@ void ClearTombstonesInRangeByRehashing(
       SetCtrl(common, new_i, H2(hash), slot_size);
       // Until we are done rehashing, DELETED marks previously FULL slots.
       // But if deleted is out
-      if (!range_broken && (new_i > start_offset && new_i < end_offset)) {
-        // Swap i and new_i elements.
-        (*transfer)(set, tmp_space, new_slot_ptr);
-        (*transfer)(set, new_slot_ptr, slot_ptr);
-        (*transfer)(set, slot_ptr, tmp_space);
-        // repeat the processing of the ith slot
-        --pos;
-        slot_ptr = PrevSlot(slot_ptr, slot_size);
-      } else if (range_broken && (new_i > start_offset || new_i < end_offset)) {
+      if (IsInRange(start_offset, end_offset, cluster_wraps_around, new_i)) {
         // Swap i and new_i elements.
         (*transfer)(set, tmp_space, new_slot_ptr);
         (*transfer)(set, new_slot_ptr, slot_ptr);
@@ -377,6 +398,9 @@ void ClearTombstonesInRangeByRehashing(
         --pos;
         slot_ptr = PrevSlot(slot_ptr, slot_size);
       } else {
+        // Shifting out of this cluster. 
+        // We move the item there, and mark this as empty.
+        // This can only happen in the first (start_offset + group_width slots)
         (*transfer)(set, new_slot_ptr, slot_ptr);
         SetCtrl(common, pos, ctrl_t::kEmpty, slot_size);
       }
@@ -384,11 +408,12 @@ void ClearTombstonesInRangeByRehashing(
     pos = pos + 1;
     slot_ptr = NextSlot(slot_ptr, slot_size);
   }
+
+  // Handle the Group::kWidth slots after the end_offset.
   for (size_t i=0; i < Group::kWidth; i++) {
     pos = pos + 1;
-    // printf(" Checking extra %ld\n", pos);
     slot_ptr = NextSlot(slot_ptr, slot_size);
-    if (pos == capacity) {
+    if (ctrl[pos] == ctrl_t::kSentinel) {
       pos = 0;
       slot_ptr = SlotAddress(slot_array, 0, slot_size);
     }
@@ -396,8 +421,7 @@ void ClearTombstonesInRangeByRehashing(
 
     const size_t hash = (*hasher)(set, slot_ptr);
     const size_t probe_offset = probe(common, hash).offset();
-    if (!range_broken && probe_offset > end_offset) continue;
-    if (range_broken && (probe_offset < start_offset && probe_offset > end_offset)) continue;
+    if (!IsInRange(start_offset, end_offset, cluster_wraps_around, probe_offset)) continue;
 
     // mark as tombstone and reinsert.
     SetCtrl(common, pos, ctrl_t::kDeleted, slot_size);
@@ -614,70 +638,32 @@ void DropDeletesWithoutResizeByPushingTombstones(
   ResetGrowthLeft(common);
 }
 
-void DropDeletesWithoutResizeByRehashingRange(
+void DropDeletesWithoutResizeByRehashingClusters(
   CommonFields& common,
   const PolicyFunctions& policy, 
-  size_t start_offset,
   void *tmp_space) {
 
   size_t scan_length = 0;
   const size_t capacity = common.capacity();
   ctrl_t* ctrl = common.control();
   // Find the first slot after seq that has an empty.
-  size_t range_start = start_offset;
-  size_t range_end = start_offset;
-  probe_seq<Group::kWidth> seq(start_offset, capacity);
-  // Find an empty.
-  while (true) {
-    GroupEmptyOrDeleted g{ctrl + seq.offset()};
-    auto mask = g.MaskEmpty();
-    if (mask) {
-      range_start = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
-      break;
-    }
-    seq.next();
-    assert(seq.index() != start_offset && "full table!");
-  }
-  start_offset = range_start;
+  size_t range_start = 0;
+  size_t range_end = 0;
+  range_start = FindNextEmptySlot(ctrl, range_start, capacity, &scan_length);
 
-  // Keep finding the next empty.
+  // Keep finding the next empty until we've scanned the whole hash table.
   while (scan_length < capacity) {
     // Find the next empty group.
-    seq.next();
-    while (true) {
-      GroupEmptyOrDeleted g{ctrl + seq.offset()};
-      auto mask = g.MaskEmpty();
-      if (mask) {
-        range_end = seq.offset() + mask.LowestBitSet(); // First empty slot in group.
-        break;
-      }
-      seq.next();
-      scan_length += Group::kWidth;
-      assert(seq.index() != start_offset && "full table!");
-    }
-    if (range_start == range_end) {
-      abort();
-    }
+    range_end = FindNextEmptySlot(ctrl, range_start+1, capacity, &scan_length);
+    range_end &= capacity;
     // printf("Clearing: [%ld %ld] tc: %ld size: %ld\n", range_start, range_end, common.TombstonesCount(), common.capacity());
-    ClearTombstonesInRangeByRehashing(common, policy, range_start, range_end, tmp_space);
+    ClearTombstonesInRangeByRehashingCluster(common, policy, range_start, range_end, tmp_space);
     range_start = range_end;
-    // We've completed the full scan.
-    if (range_start == start_offset) break;
   }
-  // printf("item at 589: %ld\n", *(size_t *)(SlotAddress(common.slot_array(), 589, policy.slot_size)));
   ResetGrowthLeft(common);
 }
 
-bool IsInRange(size_t start_offset, size_t end_offset, bool wrapped_around, size_t position) {
-  if (wrapped_around) {
-    assert(end_offset <= start_offset);
-    return (position > start_offset || position < end_offset);
-  } else {
-    assert(end_offset >= start_offset);
-    return (position > start_offset && position < end_offset);
-  }
-}
-
+// Returns true if pos2 is ahead of pos1 in a sequence that starts from start_offset. 
 bool IsAhead(size_t start_offset, size_t capacity, size_t pos1, size_t pos2) {
   // Get Distance from start_offset
   size_t dist1 = (pos1 - start_offset) & capacity;
@@ -777,43 +763,42 @@ void RedistributeTombstones(
   void* slot_ptr = SlotAddress(slot_array, 0, slot_size);
   size_t primitive_tombstone_slot = tombstone_distance;
   void* primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
-
   for (size_t i = 0; i != capacity;
        ++i, slot_ptr = NextSlot(slot_ptr, slot_size)) {
-        if (IsFull(ctrl[i])) continue;
-        // TODO: There is a small chance that dropDeletes doesn't drop all tombstones.
-        if(IsDeleted(ctrl[i])) continue;
+      if (IsFull(ctrl[i])) continue;
+      // TODO: There is a small chance that dropDeletes doesn't drop all tombstones.
+      if(IsDeleted(ctrl[i])) continue;
 
-        assert(IsEmpty(ctrl[i]));
+      assert(IsEmpty(ctrl[i]));
 
-        // We have not yet gone ahead the primitive tombstone spot.
-        // But we need to reset the primitive tombstone spot.
-        // This is to prevent swapping items across clusters. 
-        if (i < primitive_tombstone_slot) {
-          primitive_tombstone_slot += tombstone_distance;
-          primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
-          continue;
-        }
-
-        // If the primitive tombstone slot was already an empty space, don't swap, but reset i.
-        if (IsEmpty(ctrl[primitive_tombstone_slot])) {
-          primitive_tombstone_slot += tombstone_distance;
-          primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
-          --i;
-          slot_ptr = PrevSlot(slot_ptr, slot_size);
-          continue;
-        }
-
-        // Swap item at pts slot here, 
-        const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
-        SetCtrl(common, i, H2(hash), slot_size);
-        (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
-        // mark primitive tombstone slot as tombstone 
-        SetCtrl(common, primitive_tombstone_slot, ctrl_t::kDeleted, slot_size);
-
-        // Reset Primitive tombstone slot
+      // We have not yet gone ahead the primitive tombstone spot.
+      // But we need to reset the primitive tombstone spot.
+      // This is to prevent swapping items across clusters. 
+      if (i < primitive_tombstone_slot) {
         primitive_tombstone_slot += tombstone_distance;
         primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+        continue;
+      }
+
+      // If the primitive tombstone slot was already an empty space, don't swap, but reset i.
+      if (IsEmpty(ctrl[primitive_tombstone_slot])) {
+        primitive_tombstone_slot += tombstone_distance;
+        primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
+        --i;
+        slot_ptr = PrevSlot(slot_ptr, slot_size);
+        continue;
+      }
+
+      // Swap item at pts slot here, 
+      const size_t hash = (*hasher)(set, primitive_tombstone_ptr);
+      SetCtrl(common, i, H2(hash), slot_size);
+      (*transfer)(set, slot_ptr, primitive_tombstone_ptr);
+      // mark primitive tombstone slot as tombstone 
+      SetCtrl(common, primitive_tombstone_slot, ctrl_t::kDeleted, slot_size);
+
+      // Reset Primitive tombstone slot
+      primitive_tombstone_slot += tombstone_distance;
+      primitive_tombstone_ptr = SlotAddress(slot_array, primitive_tombstone_slot, slot_size);
   }
 }
 
