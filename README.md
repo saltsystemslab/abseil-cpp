@@ -8,6 +8,7 @@ h.reserve(1196)
 ## List of Preprocessor Flags
 
 Load Factor = items / capacity
+
 True Load Factor = (items + tombstones)/capacity
 
 1. ABSL_LINEAR_PROBING
@@ -47,6 +48,13 @@ True Load Factor = (items + tombstones)/capacity
 	1. Linear Probing
 	2. Rebuilds in a deamortized fashion, while also inserting tombstones
 	3. Inserts tombstones every 4.x, (x=1/(1-load factor)) distance.
+
+## Important Functions
+```C++
+absl_raw_hash_set.h::find_or_prepare_insert
+absl_raw_hash_set.h::prepare_insert
+absl_raw_hash_set.h::rehash_and_grow_if_necessary
+```
 
 ### Running Correctness Tests
 
