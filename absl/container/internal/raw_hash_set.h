@@ -3268,7 +3268,9 @@ private:
     #ifdef ABSL_ZOMBIE_GR_REBUILD_REHASH_RANGE
     alignas(slot_type) unsigned char tmp[sizeof(slot_type)];
     ClearTombstonesInRangeByRehashing(common(), GetPolicyFunctions(), range_start, range_end, tmp);
+    #ifdef ABSL_ZOMBIE_REDISTRIBUTE_TOMBSTONES
     RedistributeTombstonesInRange(common(), GetPolicyFunctions(), range_start, range_end, 2 * common().capacity()/(common().get_load_factor_x()));
+    #endif
     common().set_current_rebuild_pos(range_end);
     #else
     abort();
