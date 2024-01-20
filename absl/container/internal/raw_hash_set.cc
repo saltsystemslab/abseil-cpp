@@ -323,6 +323,8 @@ void ClearTombstonesInRangeByRehashingCluster(
   size_t end_offset,
   void *tmp_space) {
 
+  uint64_t range_num_elements = 0;
+  uint64_t range_capacity= 0;
   if (start_offset == end_offset) {
     // TODO: call DropDeletesWithoutResize()
     abort();
@@ -359,6 +361,7 @@ void ClearTombstonesInRangeByRehashingCluster(
       slot_ptr = SlotAddress(slot_array, pos, slot_size);
       continue;
     }
+    range_capacity++;
     assert(slot_ptr == SlotAddress(slot_array, pos, slot_size));
 
     if (IsEmpty(ctrl[pos])) {
@@ -369,6 +372,7 @@ void ClearTombstonesInRangeByRehashingCluster(
 
     // The slot now points to a item that needs to be rehashed.
     // This slot's metadata was converted to a deleted above.
+    range_num_elements++;
     assert(ctrl[pos] == ctrl_t::kDeleted);
     const size_t hash = (*hasher)(set, slot_ptr);
     const FindInfo target = find_first_non_full(common, hash);
@@ -457,6 +461,10 @@ void ClearTombstonesInRangeByRehashingCluster(
     (*transfer)(set, new_slot_ptr, slot_ptr);
     SetCtrl(common, new_i, H2(hash), slot_size);
   }
+  range_capacity--; // Remove the start_offset.
+  size_t old_growth_left = common.growth_left();
+  size_t tombstones_cleared = range_capacity - range_num_elements;
+  common.set_growth_left(old_growth_left + tombstones_cleared);
 }
 
 void ClearTombstonesInRange(

@@ -983,6 +983,10 @@ using CommonFieldsGenerationInfo = CommonFieldsGenerationInfoDisabled;
 using HashSetIteratorGenerationInfo = HashSetIteratorGenerationInfoDisabled;
 #endif
 
+#ifndef ABSL_MAX_TRUE_LOAD_FACTOR
+#define ABSL_MAX_TRUE_LOAD_FACTOR 0.975
+#endif
+
 // Returns whether `n` is a valid capacity (i.e., number of slots).
 //
 // A valid capacity is a non-zero integer `2^m - 1`.
@@ -1131,6 +1135,15 @@ class CommonFields : public CommonFieldsGenerationInfo {
   }
 
   bool should_rebuild() {
+    // Size including tombstones.
+    size_t true_size = capacity() * ABSL_MAX_TRUE_LOAD_FACTOR - growth_left();
+    if (true_size < size()) {
+      printf("%ld %ld %ld\n", size(), true_size, growth_left());
+      abort();
+    }
+    if (true_size * 8 < capacity() * 7) {
+      return false;
+    }
     if (target_rebuild_num_full_scans > current_rebuild_num_full_scans) {
       return true;
     }
@@ -1154,6 +1167,7 @@ class CommonFields : public CommonFieldsGenerationInfo {
   void set_current_rebuild_pos(size_t pos) {
     if (pos < current_rebuild_pos_) {
       current_rebuild_num_full_scans++;
+      printf("current_rounds: %ld target rounds: %ld \n", current_rebuild_num_full_scans, target_rebuild_num_full_scans);
     }
     current_rebuild_pos_ = pos;
   }
@@ -1164,7 +1178,10 @@ class CommonFields : public CommonFieldsGenerationInfo {
   // If we have not rebuilt until the target, we rebuild the next cluster.
   void advance_target_rebuild_pos() {
     target_rebuild_pos_ += (rebuild_window_multiplier) * get_load_factor_x();
-    if (target_rebuild_pos_ > capacity()) target_rebuild_num_full_scans++;
+    if (target_rebuild_pos_ > capacity()) {
+      target_rebuild_num_full_scans++;
+      printf("current_rounds: %ld target rounds: %ld \n", current_rebuild_num_full_scans, target_rebuild_num_full_scans);
+    }
     target_rebuild_pos_ = target_rebuild_pos_ & capacity();
   }
 
@@ -1260,9 +1277,6 @@ inline size_t NormalizeCapacity(size_t n) {
   return n ? ~size_t{} >> countl_zero(n) : 1;
 }
 
-#ifndef ABSL_MAX_TRUE_LOAD_FACTOR
-#define ABSL_MAX_TRUE_LOAD_FACTOR 0.975
-#endif
 
 // General notes on capacity/growth methods below:
 // - We use 7/8th as maximum load factor. For 16-wide groups, that gives an
