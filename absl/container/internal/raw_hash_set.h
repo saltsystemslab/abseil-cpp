@@ -1137,10 +1137,6 @@ class CommonFields : public CommonFieldsGenerationInfo {
   bool should_rebuild() {
     // Size including tombstones.
     size_t true_size = capacity() * ABSL_MAX_TRUE_LOAD_FACTOR - growth_left();
-    if (true_size < size()) {
-      printf("%ld %ld %ld\n", size(), true_size, growth_left());
-      abort();
-    }
     if (true_size * 8 < capacity() * 7) {
       return false;
     }
